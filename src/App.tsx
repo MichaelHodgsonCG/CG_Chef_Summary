@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, BarChart3, Trophy, TrendingUp, Menu, X, LogOut, Settings, User, Book, FileText, Upload, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Trophy, TrendingUp, Menu, X, LogOut, Settings, User, Book, FileText, Upload, PanelLeft, ListOrdered } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import LocationDetail from './components/LocationDetail';
 import UploadPage from './components/UploadPage';
@@ -14,10 +14,11 @@ import { ChefSummaryDashboard } from './components/ChefSummaryDashboard';
 import { ChefConsolidationView } from './components/ChefConsolidationView';
 import UserSettings from './components/UserSettings';
 import { UsageVarianceReport } from './components/UsageVarianceReport';
+import { ConsolidatedItemVariance } from './components/ConsolidatedItemVariance';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
 
-type View = 'dashboard' | 'upload' | 'detail' | 'portfolio' | 'compare' | 'rankings' | 'trends' | 'admin' | 'settings' | 'chef-summary' | 'chef' | 'guided-package' | 'variance-report';
+type View = 'dashboard' | 'upload' | 'detail' | 'portfolio' | 'compare' | 'rankings' | 'trends' | 'admin' | 'settings' | 'chef-summary' | 'chef' | 'guided-package' | 'variance-report' | 'menu-variance';
 
 // The boxed "CG" lockup — Georgia serif per the CGOPS brand (the only serif use).
 function BrandMark({ size = 30 }: { size?: number }) {
@@ -41,6 +42,7 @@ const VIEW_TITLES: Record<string, string> = {
   chef: 'Chef',
   'chef-summary': 'Chef',
   'variance-report': 'Variance',
+  'menu-variance': 'Menu Variance',
   'guided-package': 'Guided Package',
   settings: 'Settings',
   admin: 'Admin',
@@ -111,6 +113,7 @@ function AppContent() {
     { id: 'trends' as View, label: 'Trends', icon: TrendingUp, mobile: true },
     { id: 'chef' as View, label: 'Chef', icon: Book, mobile: true },
     { id: 'variance-report' as View, label: 'Variance', icon: FileText, mobile: false },
+    { id: 'menu-variance' as View, label: 'Menu Variance', icon: ListOrdered, mobile: false },
   ];
 
   const isItemActive = (id: View) => view === id || (view === 'detail' && id === 'dashboard');
@@ -255,6 +258,7 @@ function AppContent() {
           {view === 'chef' && <ChefConsolidationView />}
           {view === 'chef-summary' && <ChefSummaryDashboard />}
           {view === 'variance-report' && <UsageVarianceReport />}
+          {view === 'menu-variance' && <ConsolidatedItemVariance />}
           {view === 'dashboard' && (
             <Dashboard
               onLocationClick={handleLocationClick}
