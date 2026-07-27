@@ -893,6 +893,100 @@ function parseUsageReport(csvText: string): UsageReportRow[] {
     .filter((row) => row.itemName !== '');
 }
 
+// The full "Usage Summary - Count Amounts" report — every item's weekly usage
+// variance (not just Top 25/Bottom 10). It's a Silverware SSRS export where each
+// row repeats the report header and appends one item at fixed tail columns:
+//   74 category · 89 item name · 93 net variance $ (= actual − ideal; + = over)
+//   94 ideal $ · 95 actual $ · 96 waste $ · 98 UOM.
+type CountAmountsRow = {
+  itemName: string;
+  category: string;
+  netVariance: number;
+  actualUsage: number;
+  idealUsage: number;
+  waste: number;
+  uom: string;
+};
+
+function parseCountAmountsReport(csvText: string): CountAmountsRow[] {
+  const lines = csvText.split(/\r?\n/).filter((line) => line.trim() !== '');
+  if (lines.length < 2) {
+    throw new Error('This report has no data rows.');
+  }
+
+  const out: CountAmountsRow[] = [];
+  for (const line of lines.slice(1)) {
+    const row = parseCsvLine(line);
+    if (row.length < 99) continue;
+    const itemName = (row[89] ?? '').trim();
+    if (!itemName || /totals?$/i.test(itemName)) continue;
+    out.push({
+      itemName,
+      category: (row[74] ?? '').trim(),
+      netVariance: parseCurrency(row[93] ?? '0'),
+      idealUsage: parseCurrency(row[94] ?? '0'),
+      actualUsage: parseCurrency(row[95] ?? '0'),
+      waste: parseCurrency(row[96] ?? '0'),
+      uom: (row[98] ?? '').trim(),
+    });
+  }
+
+  if (out.length === 0) {
+    throw new Error('No item rows found — is this the "Usage Summary - Count Amounts" report?');
+  }
+  return out;
+}
+
+// Persist a location/week's full item variances for the consolidated report.
+// Replace-on-reupload, then prune this location's rows older than 13 weeks.
+async function storeCountAmountsVariances(
+  locationId: string,
+  fiscalYear: number,
+  periodNumber: number,
+  weekNumber: number,
+  weekEndingDate: string | null,
+  items: CountAmountsRow[]
+): Promise<void> {
+  await supabase
+    .from('weekly_summary_item_variances')
+    .delete()
+    .eq('location_id', locationId)
+    .eq('fiscal_year', fiscalYear)
+    .eq('period_number', periodNumber)
+    .eq('week_number', weekNumber);
+
+  if (items.length > 0) {
+    const rows = items.map((it) => ({
+      location_id: locationId,
+      fiscal_year: fiscalYear,
+      period_number: periodNumber,
+      week_number: weekNumber,
+      week_ending_date: weekEndingDate,
+      item_name: it.itemName,
+      category: it.category || null,
+      uom: it.uom || null,
+      net_variance_amount: it.netVariance,
+      actual_usage_amount: it.actualUsage,
+      ideal_usage_amount: it.idealUsage,
+      waste_amount: it.waste,
+      source: 'count_amounts',
+    }));
+    const { error } = await supabase.from('weekly_summary_item_variances').insert(rows);
+    if (error) throw error;
+  }
+
+  // Retention: drop this location's variances older than ~13 weeks.
+  if (weekEndingDate) {
+    const cutoff = new Date(weekEndingDate);
+    cutoff.setDate(cutoff.getDate() - 91);
+    await supabase
+      .from('weekly_summary_item_variances')
+      .delete()
+      .eq('location_id', locationId)
+      .lt('week_ending_date', cutoff.toISOString().slice(0, 10));
+  }
+}
+
 type UsageFlaggedItem = {
   itemName: string;
   direction: 'under' | 'over';
@@ -1564,12 +1658,32 @@ export function GuidedWeeklyPackage({
 
     try {
       const text = await file.text();
-      const rows = parseUsageReport(text);
+      // Week 1 is now the full "Count Amounts" report (all items). Map it to the
+      // {itemName, varianceAmount} shape the flagging UI already uses...
+      const items = parseCountAmountsReport(text);
+      const rows: UsageReportRow[] = items.map((it) => ({ itemName: it.itemName, varianceAmount: it.netVariance }));
       setUsageWeekRows(rows);
       if (usageFourWeekRows) {
         const flagged = buildUsageFlaggedItems(rows, usageFourWeekRows);
         setUsageFlaggedItems(flagged);
         onFieldsChange?.({ usage_review_items: JSON.stringify(flagged) });
+      }
+
+      // ...and persist the complete item set for the consolidated menu report.
+      if (locationId && fiscalYear && periodNumber && weekNumber) {
+        try {
+          const { data: cal } = await supabase
+            .from('fiscal_calendar')
+            .select('end_date')
+            .eq('fiscal_year', fiscalYear)
+            .eq('period', periodNumber)
+            .eq('week', weekNumber)
+            .maybeSingle();
+          const weekEndingDate = (cal?.end_date as string) ?? null;
+          await storeCountAmountsVariances(locationId, fiscalYear, periodNumber, weekNumber, weekEndingDate, items);
+        } catch (e) {
+          console.error('Failed to store item variances', e);
+        }
       }
     } catch (err) {
       setUsageWeekError(err instanceof Error ? err.message : 'Failed to parse this report.');
@@ -4251,14 +4365,14 @@ function GuidedUsageReviewStep({
       <div className="mt-4">
         <h3 className="text-base font-semibold text-slate-800">Run the Reports</h3>
         <ul className="mt-2 space-y-1 list-disc list-inside text-sm text-slate-600">
-          <li>OC &gt; Reports &gt; Usage Summary - Top 25 / Bottom 10 &gt; Select Date Range &gt; Category: Food &gt; Run Report &gt; Save to CSV.</li>
-          <li>Run it twice: once for the reporting week, once for the trailing 4 weeks (the current reporting week plus the 3 previous weeks).</li>
+          <li>OC &gt; Reports &gt; Usage Summary - Count Amounts &gt; Select Date Range (current reporting week) &gt; Category: Food &gt; Run Report &gt; Save to CSV.</li>
+          <li>OC &gt; Reports &gt; Usage Summary - Top 25 / Bottom 10 &gt; Select Date Range (current reporting week plus the 3 previous weeks) &gt; Category: Food &gt; Run Report &gt; Save to CSV.</li>
         </ul>
       </div>
 
       <UsageReportUploadZone
-        title="1. Upload Reporting Week Report"
-        instructions="Select the reporting week's date range, then upload the saved CSV."
+        title="1. Upload Reporting Week Report (Count Amounts — all items)"
+        instructions="Select the reporting week's date range on the Usage Summary - Count Amounts report, then upload the saved CSV."
         file={weekFile}
         rowCount={weekRows ? weekRows.length : null}
         error={weekError}
@@ -4266,8 +4380,8 @@ function GuidedUsageReviewStep({
       />
 
       <UsageReportUploadZone
-        title="2. Upload Trailing 4-Week Report (Current Week + 3 Previous)"
-        instructions="Select a date range covering the trailing 4 weeks — the current reporting week plus the 3 previous weeks — then upload the saved CSV."
+        title="2. Upload Trailing 4-Week Report (Top 25 / Bottom 10 — Current Week + 3 Previous)"
+        instructions="Select a date range covering the trailing 4 weeks — the current reporting week plus the 3 previous weeks — on the Top 25 / Bottom 10 report, then upload the saved CSV."
         file={fourWeekFile}
         rowCount={fourWeekRows ? fourWeekRows.length : null}
         error={fourWeekError}
@@ -4288,7 +4402,7 @@ function GuidedUsageReviewStep({
 
       <StepGateHint
         ready={usageStepReady}
-        hint="Upload both the reporting week and trailing 4-week Top 25 reports to continue."
+        hint="Upload both the reporting-week Count Amounts report and the trailing 4-week Top 25 / Bottom 10 report to continue."
       />
 
       <div className="mt-8 flex justify-between">
