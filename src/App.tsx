@@ -20,15 +20,32 @@ import { supabase } from './lib/supabase';
 
 type View = 'dashboard' | 'upload' | 'detail' | 'portfolio' | 'compare' | 'rankings' | 'trends' | 'admin' | 'settings' | 'chef-summary' | 'chef' | 'guided-package' | 'variance-report' | 'menu-variance';
 
-// The boxed "CG" lockup — Georgia serif per the CGOPS brand (the only serif use).
+// The boxed "CG" mark — Charcoal Group brand lockup. Inline SVG so it stays
+// crisp at any size and inherits the current text color (theme-aware).
 function BrandMark({ size = 30 }: { size?: number }) {
   return (
-    <span
-      className="flex items-center justify-center border-2 border-cg-text rounded flex-none"
-      style={{ width: size, height: Math.round(size * 0.78), fontFamily: 'Georgia, "Times New Roman", serif' }}
+    <svg
+      width={size}
+      height={Math.round(size * 0.82)}
+      viewBox="0 0 100 82"
+      className="flex-none text-cg-text"
+      role="img"
+      aria-label="Charcoal Group"
     >
-      <span className="font-bold italic leading-none" style={{ fontSize: Math.round(size * 0.4), letterSpacing: '-0.5px' }}>CG</span>
-    </span>
+      <rect x="5" y="5" width="90" height="72" rx="4" fill="none" stroke="currentColor" strokeWidth="8" />
+      <text
+        x="50"
+        y="57"
+        textAnchor="middle"
+        fontFamily="Arial, Helvetica, sans-serif"
+        fontWeight="800"
+        fontSize="44"
+        letterSpacing="-2"
+        fill="currentColor"
+      >
+        CG
+      </text>
+    </svg>
   );
 }
 
