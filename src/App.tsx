@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, BarChart3, Trophy, TrendingUp, Menu, X, LogOut, Settings, User, Book, FileText, Upload, PanelLeft, ListOrdered } from 'lucide-react';
+import { BarChart3, Trophy, TrendingUp, Menu, X, LogOut, Settings, User, Book, PanelLeft, ListOrdered } from 'lucide-react';
 import { LogoMark } from './components/Logo';
 import Dashboard from './components/Dashboard';
 import LocationDetail from './components/LocationDetail';
@@ -14,7 +14,6 @@ import { LocationDashboard } from './components/LocationDashboard';
 import { ChefSummaryDashboard } from './components/ChefSummaryDashboard';
 import { ChefConsolidationView } from './components/ChefConsolidationView';
 import UserSettings from './components/UserSettings';
-import { UsageVarianceReport } from './components/UsageVarianceReport';
 import { ConsolidatedItemVariance } from './components/ConsolidatedItemVariance';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
@@ -41,8 +40,7 @@ const VIEW_TITLES: Record<string, string> = {
   trends: 'Trends',
   chef: 'Chef',
   'chef-summary': 'Chef',
-  'variance-report': 'Variance',
-  'menu-variance': 'Menu Variance',
+  'menu-variance': 'Usage Variance by Concept',
   'guided-package': 'Guided Package',
   settings: 'Settings',
   admin: 'Admin',
@@ -104,16 +102,14 @@ function AppContent() {
     setMobileMenuOpen(false);
   };
 
+  // P&L (view) and P&L Upload now live in the Admin Panel; the standalone
+  // "Variance" (chef reasons) report is folded into the Usage Variance page.
   const navigationItems = [
     { id: 'portfolio' as View, label: 'Home', icon: BarChart3, mobile: true },
     { id: 'rankings' as View, label: 'Leaderboard', icon: Trophy, mobile: true },
-    { id: 'dashboard' as View, label: 'P&L', icon: LayoutDashboard, mobile: true },
-    // Upload P&L is an admin-only function.
-    ...(isAdmin ? [{ id: 'upload' as View, label: 'Upload', icon: Upload, mobile: false }] : []),
     { id: 'trends' as View, label: 'Trends', icon: TrendingUp, mobile: true },
     { id: 'chef' as View, label: 'Chef', icon: Book, mobile: true },
-    { id: 'variance-report' as View, label: 'Variance', icon: FileText, mobile: false },
-    { id: 'menu-variance' as View, label: 'Menu Variance', icon: ListOrdered, mobile: false },
+    { id: 'menu-variance' as View, label: 'Usage Variance', icon: ListOrdered, mobile: true },
   ];
 
   const isItemActive = (id: View) => view === id || (view === 'detail' && id === 'dashboard');
@@ -257,7 +253,6 @@ function AppContent() {
           {view === 'trends' && selectedWeek && <TrendsView weekEndingDate={selectedWeek} />}
           {view === 'chef' && <ChefConsolidationView />}
           {view === 'chef-summary' && <ChefSummaryDashboard />}
-          {view === 'variance-report' && <UsageVarianceReport />}
           {view === 'menu-variance' && <ConsolidatedItemVariance />}
           {view === 'dashboard' && (
             <Dashboard
