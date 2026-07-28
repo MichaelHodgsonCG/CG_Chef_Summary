@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LayoutDashboard, BarChart3, Trophy, TrendingUp, Menu, X, LogOut, Settings, User, Book, FileText, Upload, PanelLeft, ListOrdered } from 'lucide-react';
+import { LogoMark } from './components/Logo';
 import Dashboard from './components/Dashboard';
 import LocationDetail from './components/LocationDetail';
 import UploadPage from './components/UploadPage';
@@ -20,32 +21,14 @@ import { supabase } from './lib/supabase';
 
 type View = 'dashboard' | 'upload' | 'detail' | 'portfolio' | 'compare' | 'rankings' | 'trends' | 'admin' | 'settings' | 'chef-summary' | 'chef' | 'guided-package' | 'variance-report' | 'menu-variance';
 
-// The boxed "CG" mark — Charcoal Group brand lockup. Inline SVG so it stays
-// crisp at any size and inherits the current text color (theme-aware).
+// The boxed "CG" monogram — official Charcoal Group artwork (src/assets/
+// cg-mark.png), rendered via the shared LogoMark. The sidebar is a light
+// surface, so the black-on-transparent mark shows as-is (no invert).
 function BrandMark({ size = 30 }: { size?: number }) {
   return (
-    <svg
-      width={size}
-      height={Math.round(size * 0.82)}
-      viewBox="0 0 100 82"
-      className="flex-none text-cg-text"
-      role="img"
-      aria-label="Charcoal Group"
-    >
-      <rect x="5" y="5" width="90" height="72" rx="4" fill="none" stroke="currentColor" strokeWidth="8" />
-      <text
-        x="50"
-        y="57"
-        textAnchor="middle"
-        fontFamily="Arial, Helvetica, sans-serif"
-        fontWeight="800"
-        fontSize="44"
-        letterSpacing="-2"
-        fill="currentColor"
-      >
-        CG
-      </text>
-    </svg>
+    <span className="flex-none inline-flex" style={{ width: size, height: Math.round(size * 0.82) }}>
+      <LogoMark className="w-full h-full" title="Charcoal Group" />
+    </span>
   );
 }
 
