@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Users, MapPin, LogOut, Shield, ChefHat, Calendar, Lock, DollarSign, LayoutDashboard, Upload } from 'lucide-react';
+import { Settings, Users, LogOut, ChefHat, Lock, DollarSign, LayoutDashboard, Upload } from 'lucide-react';
 import { UsersManager } from './UsersManager';
-import LocationsManager from './LocationsManager';
-import { RolesManager } from './RolesManager';
 import { ChefSummariesManager } from './ChefSummariesManager';
-import FiscalCalendarManager from './FiscalCalendarManager';
 import PermissionsManager from './PermissionsManager';
 import { PLAdjustments } from './PLAdjustments';
 import Dashboard from './Dashboard';
@@ -19,7 +16,7 @@ interface AdminMenuProps {
 
 export function AdminMenu({ onClose }: AdminMenuProps) {
   const { logout } = useAuth();
-  const [activeSection, setActiveSection] = useState<'users' | 'locations' | 'roles' | 'permissions' | 'chef-summaries' | 'fiscal-calendar' | 'pl-adjustments' | 'pl' | 'pl-upload'>('users');
+  const [activeSection, setActiveSection] = useState<'users' | 'permissions' | 'chef-summaries' | 'pl-adjustments' | 'pl' | 'pl-upload'>('users');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Local state for the hosted P&L view (moved here from the main sidebar).
@@ -77,28 +74,6 @@ export function AdminMenu({ onClose }: AdminMenuProps) {
             <span className="font-medium">Users</span>
           </button>
           <button
-            onClick={() => setActiveSection('locations')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              activeSection === 'locations'
-                ? 'bg-cg-accent text-white'
-                : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <MapPin className="w-5 h-5" />
-            <span className="font-medium">Locations</span>
-          </button>
-          <button
-            onClick={() => setActiveSection('roles')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              activeSection === 'roles'
-                ? 'bg-cg-accent text-white'
-                : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <Shield className="w-5 h-5" />
-            <span className="font-medium">Roles</span>
-          </button>
-          <button
             onClick={() => setActiveSection('permissions')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
               activeSection === 'permissions'
@@ -119,17 +94,6 @@ export function AdminMenu({ onClose }: AdminMenuProps) {
           >
             <ChefHat className="w-5 h-5" />
             <span className="font-medium">Chef Summaries</span>
-          </button>
-          <button
-            onClick={() => setActiveSection('fiscal-calendar')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-              activeSection === 'fiscal-calendar'
-                ? 'bg-cg-accent text-white'
-                : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <Calendar className="w-5 h-5" />
-            <span className="font-medium">Fiscal Calendar</span>
           </button>
           <button
             onClick={() => setActiveSection('pl-adjustments')}
@@ -180,11 +144,8 @@ export function AdminMenu({ onClose }: AdminMenuProps) {
       <div className="flex-1 overflow-auto">
         <div className="max-w-7xl mx-auto p-4 md:p-6">
           {activeSection === 'users' && <UsersManager />}
-          {activeSection === 'locations' && <LocationsManager />}
-          {activeSection === 'roles' && <RolesManager />}
           {activeSection === 'permissions' && <PermissionsManager />}
           {activeSection === 'chef-summaries' && <ChefSummariesManager />}
-          {activeSection === 'fiscal-calendar' && <FiscalCalendarManager />}
           {activeSection === 'pl-adjustments' && <PLAdjustments />}
           {activeSection === 'pl' && (
             plDetailLoc ? (
