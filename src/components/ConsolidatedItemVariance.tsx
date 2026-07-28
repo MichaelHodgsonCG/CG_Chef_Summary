@@ -180,8 +180,8 @@ export function ConsolidatedItemVariance() {
   // Kitchen print sheet: a wide item x location matrix (Top 25 over / Bottom 10
   // under) so a chef can see their location's number next to every other
   // location's, side by side. Meant to be printed and posted.
-  const PRINT_OVER = 25;
-  const PRINT_UNDER = 10;
+  const PRINT_OVER = 10;
+  const PRINT_UNDER = 5;
   const exportPrintSheet = () => {
     const byItem = new Map<string, { total: number; byLoc: Map<string, number> }>();
     for (const r of rows) {
@@ -199,15 +199,20 @@ export function ConsolidatedItemVariance() {
     const underList = items.filter((i) => i.total < 0).sort((a, b) => a.total - b.total).slice(0, PRINT_UNDER);
 
     const esc = (s: string | number) => `"${String(s).replace(/"/g, '""')}"`;
-    // Whole dollars; blank when a location has no meaningful variance for the item.
-    const cell = (v: number | undefined) => (v === undefined || Math.round(v) === 0 ? '' : String(Math.round(v)));
+    // Whole dollars, e.g. $1,046 / -$329; blank when a location has no
+    // meaningful variance for the item.
+    const money$ = (v: number | undefined) => {
+      const n = Math.round(v ?? 0);
+      if (n === 0) return '';
+      return `${n < 0 ? '-$' : '$'}${Math.abs(n).toLocaleString('en-US')}`;
+    };
     const weekLabel = selectedWeeks
       .slice()
       .sort()
       .map((w) => weeks.find((o) => o.weekEndingDate === w)?.label || w)
       .join('; ');
 
-    const header = ['Item Description', 'Variance All', ...locations.map((l) => `Var ${l.code}`), 'Notes'];
+    const header = ['Item Description', 'Variance All', ...locations.map((l) => `Var ${l.code}`)];
     const lines: string[] = [];
     lines.push(esc(`${selectedMenu} — Menu Usage Variance`));
     lines.push(esc(`Top ${PRINT_OVER} Over-Used / Bottom ${PRINT_UNDER} Under-Used`));
@@ -221,9 +226,8 @@ export function ConsolidatedItemVariance() {
         lines.push(
           [
             esc(it.name),
-            String(Math.round(it.total)),
-            ...locations.map((l) => cell(it.byLoc.get(l.id))),
-            '',
+            esc(money$(it.total)),
+            ...locations.map((l) => esc(money$(it.byLoc.get(l.id)))),
           ].join(',')
         );
       });
