@@ -93,12 +93,23 @@ export function ConsolidatedItemVariance() {
     setLoading(true);
     try {
       const ids = locations.map((l) => l.id);
-      const { data } = await supabase
-        .from('weekly_summary_item_variances')
-        .select('location_id, item_name, net_variance_amount')
-        .in('location_id', ids)
-        .in('week_ending_date', selectedWeeks);
-      setRows(data || []);
+      // PostgREST caps a single response at 1,000 rows. A full menu week is
+      // ~3,600 rows (13 locations × ~275 items), so page through in chunks
+      // to avoid silently dropping locations.
+      const PAGE = 1000;
+      const all: VarianceRow[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data } = await supabase
+          .from('weekly_summary_item_variances')
+          .select('location_id, item_name, net_variance_amount')
+          .in('location_id', ids)
+          .in('week_ending_date', selectedWeeks)
+          .range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        all.push(...(data as VarianceRow[]));
+        if (data.length < PAGE) break;
+      }
+      setRows(all);
     } finally {
       setLoading(false);
     }
