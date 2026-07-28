@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronRight, Download, ListOrdered, AlertTriangle, Table } from 'lucide-react';
+import { ChevronRight, Download, ListOrdered, AlertTriangle, Table, MessageSquareText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { UsageVarianceReport } from './UsageVarianceReport';
 
 type MenuLocation = { id: string; name: string; code: string };
 
@@ -40,6 +41,9 @@ export function ConsolidatedItemVariance() {
   const [rows, setRows] = useState<VarianceRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // 'concept' = consolidated ranking across the menu; 'reasons' = the reasons
+  // chefs recorded in the Guided Workflow's Usage Review (formerly its own page).
+  const [mode, setMode] = useState<'concept' | 'reasons'>('concept');
 
   useEffect(() => {
     loadMenus();
@@ -313,33 +317,60 @@ export function ConsolidatedItemVariance() {
         <div>
           <h1 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <ListOrdered className="w-5 h-5 text-cg-accent" />
-            Menu Variance
+            Usage Variance by Concept
           </h1>
           <p className="text-sm text-cg-muted mt-1">
-            Consolidated over/under-used items across a menu's locations, with each location's contribution.
+            Consolidated over/under-used items across a concept's locations — and the reasons chefs recorded.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={exportPrintSheet}
-            disabled={rows.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-cg-accent text-white rounded-lg text-sm font-medium hover:bg-cg-accentHover transition-colors disabled:opacity-50"
-            title="Wide item-by-location grid to print and post in the kitchen"
-          >
-            <Table className="w-4 h-4" />
-            Print Sheet
-          </button>
-          <button
-            onClick={exportCsv}
-            disabled={rows.length === 0}
-            className="flex items-center gap-2 px-4 py-2 border border-cg-border text-cg-text rounded-lg text-sm font-medium hover:bg-cg-surface2 transition-colors disabled:opacity-50"
-          >
-            <Download className="w-4 h-4" />
-            Detail CSV
-          </button>
-        </div>
+        {mode === 'concept' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportPrintSheet}
+              disabled={rows.length === 0}
+              className="flex items-center gap-2 px-4 py-2 bg-cg-accent text-white rounded-lg text-sm font-medium hover:bg-cg-accentHover transition-colors disabled:opacity-50"
+              title="Wide item-by-location grid to print and post in the kitchen"
+            >
+              <Table className="w-4 h-4" />
+              Print Sheet
+            </button>
+            <button
+              onClick={exportCsv}
+              disabled={rows.length === 0}
+              className="flex items-center gap-2 px-4 py-2 border border-cg-border text-cg-text rounded-lg text-sm font-medium hover:bg-cg-surface2 transition-colors disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              Detail CSV
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Section toggle: consolidated ranking vs. the chef-entered reasons */}
+      <div className="flex gap-1 border-b border-cg-border">
+        {([
+          { key: 'concept' as const, label: 'By Concept', Icon: ListOrdered },
+          { key: 'reasons' as const, label: 'Chef Reasons', Icon: MessageSquareText },
+        ]).map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            onClick={() => setMode(key)}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              mode === key
+                ? 'border-cg-accent text-cg-accent'
+                : 'border-transparent text-cg-muted hover:text-cg-text'
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'reasons' ? (
+        <UsageVarianceReport />
+      ) : (
+       <>
       {/* Controls */}
       <div className="bg-cg-surface rounded-xl border border-cg-border shadow-cg p-4 space-y-4">
         {menus.length > 1 && (
@@ -409,6 +440,8 @@ export function ConsolidatedItemVariance() {
           {renderSection(`Top ${OVER_COUNT} Over-Used`, 'Costing more than ideal — worst first. Click an item for the location breakdown.', over, true)}
           {renderSection(`Bottom ${UNDER_COUNT} Under-Used`, 'Under ideal — possible count errors or missed invoices.', under, false)}
         </div>
+      )}
+       </>
       )}
     </div>
   );

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Settings, Users, MapPin, LogOut, Shield, ChefHat, Calendar, Lock, DollarSign } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Settings, Users, MapPin, LogOut, Shield, ChefHat, Calendar, Lock, DollarSign, LayoutDashboard, Upload } from 'lucide-react';
 import { UsersManager } from './UsersManager';
 import LocationsManager from './LocationsManager';
 import { RolesManager } from './RolesManager';
@@ -7,6 +7,10 @@ import { ChefSummariesManager } from './ChefSummariesManager';
 import FiscalCalendarManager from './FiscalCalendarManager';
 import PermissionsManager from './PermissionsManager';
 import { PLAdjustments } from './PLAdjustments';
+import Dashboard from './Dashboard';
+import UploadPage from './UploadPage';
+import LocationDetail from './LocationDetail';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 
 interface AdminMenuProps {
@@ -15,8 +19,27 @@ interface AdminMenuProps {
 
 export function AdminMenu({ onClose }: AdminMenuProps) {
   const { logout } = useAuth();
-  const [activeSection, setActiveSection] = useState<'users' | 'locations' | 'roles' | 'permissions' | 'chef-summaries' | 'fiscal-calendar' | 'pl-adjustments'>('users');
+  const [activeSection, setActiveSection] = useState<'users' | 'locations' | 'roles' | 'permissions' | 'chef-summaries' | 'fiscal-calendar' | 'pl-adjustments' | 'pl' | 'pl-upload'>('users');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Local state for the hosted P&L view (moved here from the main sidebar).
+  const [plWeeks, setPlWeeks] = useState<string[]>([]);
+  const [plWeek, setPlWeek] = useState('');
+  const [plDetailLoc, setPlDetailLoc] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('weekly_summary_pl_uploads')
+        .select('week_ending_date')
+        .order('week_ending_date', { ascending: false });
+      if (data) {
+        const uniq = Array.from(new Set(data.map((d) => d.week_ending_date as string)));
+        setPlWeeks(uniq);
+        if (uniq.length > 0) setPlWeek((prev) => prev || uniq[0]);
+      }
+    })();
+  }, []);
 
   const handleSignOut = () => {
     logout();
@@ -119,6 +142,28 @@ export function AdminMenu({ onClose }: AdminMenuProps) {
             <DollarSign className="w-5 h-5" />
             <span className="font-medium">P&L Adjustments</span>
           </button>
+          <button
+            onClick={() => { setActiveSection('pl'); setPlDetailLoc(null); }}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+              activeSection === 'pl'
+                ? 'bg-cg-accent text-white'
+                : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <LayoutDashboard className="w-5 h-5" />
+            <span className="font-medium">P&L</span>
+          </button>
+          <button
+            onClick={() => setActiveSection('pl-upload')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+              activeSection === 'pl-upload'
+                ? 'bg-cg-accent text-white'
+                : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <Upload className="w-5 h-5" />
+            <span className="font-medium">P&L Upload</span>
+          </button>
         </nav>
 
         <div className={`p-4 border-t border-slate-200 ${mobileMenuOpen ? 'block' : 'hidden'} md:block`}>
@@ -141,6 +186,24 @@ export function AdminMenu({ onClose }: AdminMenuProps) {
           {activeSection === 'chef-summaries' && <ChefSummariesManager />}
           {activeSection === 'fiscal-calendar' && <FiscalCalendarManager />}
           {activeSection === 'pl-adjustments' && <PLAdjustments />}
+          {activeSection === 'pl' && (
+            plDetailLoc ? (
+              <LocationDetail
+                locationId={plDetailLoc}
+                weekEndingDate={plWeek}
+                onBack={() => setPlDetailLoc(null)}
+              />
+            ) : (
+              <Dashboard
+                onLocationClick={(locId, wk) => { setPlWeek(wk); setPlDetailLoc(locId); }}
+                selectedWeek={plWeek}
+                setSelectedWeek={setPlWeek}
+                availableWeeks={plWeeks}
+                onOpenBulkUpload={() => setActiveSection('pl-upload')}
+              />
+            )
+          )}
+          {activeSection === 'pl-upload' && <UploadPage />}
         </div>
       </div>
     </div>
