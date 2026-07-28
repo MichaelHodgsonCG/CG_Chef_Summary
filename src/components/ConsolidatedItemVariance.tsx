@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronRight, Download, ListOrdered, AlertTriangle } from 'lucide-react';
+import { ChevronRight, Download, ListOrdered, AlertTriangle, Table } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type MenuLocation = { id: string; name: string; code: string };
@@ -174,11 +174,73 @@ export function ConsolidatedItemVariance() {
     };
     emit(over, 'Over');
     emit(under, 'Under');
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    downloadCsv(lines.join('\n'), `MenuVariance_${selectedMenu}_${selectedWeeks.slice().sort().join('_')}.csv`);
+  };
+
+  // Kitchen print sheet: a wide item x location matrix (Top 25 over / Bottom 10
+  // under) so a chef can see their location's number next to every other
+  // location's, side by side. Meant to be printed and posted.
+  const PRINT_OVER = 25;
+  const PRINT_UNDER = 10;
+  const exportPrintSheet = () => {
+    const byItem = new Map<string, { total: number; byLoc: Map<string, number> }>();
+    for (const r of rows) {
+      const v = r.net_variance_amount || 0;
+      let a = byItem.get(r.item_name);
+      if (!a) {
+        a = { total: 0, byLoc: new Map() };
+        byItem.set(r.item_name, a);
+      }
+      a.total += v;
+      a.byLoc.set(r.location_id, (a.byLoc.get(r.location_id) || 0) + v);
+    }
+    const items = Array.from(byItem.entries()).map(([name, a]) => ({ name, ...a }));
+    const overList = items.filter((i) => i.total > 0).sort((a, b) => b.total - a.total).slice(0, PRINT_OVER);
+    const underList = items.filter((i) => i.total < 0).sort((a, b) => a.total - b.total).slice(0, PRINT_UNDER);
+
+    const esc = (s: string | number) => `"${String(s).replace(/"/g, '""')}"`;
+    // Whole dollars; blank when a location has no meaningful variance for the item.
+    const cell = (v: number | undefined) => (v === undefined || Math.round(v) === 0 ? '' : String(Math.round(v)));
+    const weekLabel = selectedWeeks
+      .slice()
+      .sort()
+      .map((w) => weeks.find((o) => o.weekEndingDate === w)?.label || w)
+      .join('; ');
+
+    const header = ['Item Description', 'Variance All', ...locations.map((l) => `Var ${l.code}`), 'Notes'];
+    const lines: string[] = [];
+    lines.push(esc(`${selectedMenu} — Menu Usage Variance`));
+    lines.push(esc(`Top ${PRINT_OVER} Over-Used / Bottom ${PRINT_UNDER} Under-Used`));
+    lines.push(esc(`Week(s): ${weekLabel}`));
+    lines.push('');
+
+    const emitTable = (title: string, list: typeof overList) => {
+      lines.push(esc(title));
+      lines.push(header.map(esc).join(','));
+      list.forEach((it) => {
+        lines.push(
+          [
+            esc(it.name),
+            String(Math.round(it.total)),
+            ...locations.map((l) => cell(it.byLoc.get(l.id))),
+            '',
+          ].join(',')
+        );
+      });
+      lines.push('');
+    };
+    emitTable('OVER-USED  (costing more than ideal — worst first)', overList);
+    emitTable('UNDER-USED  (under ideal — possible count errors or missed invoices)', underList);
+
+    downloadCsv(lines.join('\n'), `MenuVariance_PrintSheet_${selectedMenu}_${selectedWeeks.slice().sort().join('_')}.csv`);
+  };
+
+  const downloadCsv = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `MenuVariance_${selectedMenu}_${selectedWeeks.slice().sort().join('_')}.csv`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -253,14 +315,25 @@ export function ConsolidatedItemVariance() {
             Consolidated over/under-used items across a menu's locations, with each location's contribution.
           </p>
         </div>
-        <button
-          onClick={exportCsv}
-          disabled={rows.length === 0}
-          className="flex items-center gap-2 px-4 py-2 border border-cg-border text-cg-text rounded-lg text-sm font-medium hover:bg-cg-surface2 transition-colors disabled:opacity-50"
-        >
-          <Download className="w-4 h-4" />
-          Export CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportPrintSheet}
+            disabled={rows.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-cg-accent text-white rounded-lg text-sm font-medium hover:bg-cg-accentHover transition-colors disabled:opacity-50"
+            title="Wide item-by-location grid to print and post in the kitchen"
+          >
+            <Table className="w-4 h-4" />
+            Print Sheet
+          </button>
+          <button
+            onClick={exportCsv}
+            disabled={rows.length === 0}
+            className="flex items-center gap-2 px-4 py-2 border border-cg-border text-cg-text rounded-lg text-sm font-medium hover:bg-cg-surface2 transition-colors disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            Detail CSV
+          </button>
+        </div>
       </div>
 
       {/* Controls */}
