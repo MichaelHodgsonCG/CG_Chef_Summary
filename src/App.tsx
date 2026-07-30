@@ -15,6 +15,7 @@ import { ChefSummaryDashboard } from './components/ChefSummaryDashboard';
 import { ChefConsolidationView } from './components/ChefConsolidationView';
 import UserSettings from './components/UserSettings';
 import { ConsolidatedItemVariance } from './components/ConsolidatedItemVariance';
+import { FeedbackWidget } from './components/FeedbackWidget';
 import { useAuth } from './lib/auth';
 import { supabase } from './lib/supabase';
 
@@ -82,7 +83,14 @@ function AppContent() {
   };
 
   if (!hasHQAccess) {
-    return <LocationDashboard />;
+    // Chef cohort skips the HQ shell; the widget still floats over it (it
+    // renders only for users with a Supabase session).
+    return (
+      <>
+        <LocationDashboard />
+        <FeedbackWidget screen="Chef Dashboard" />
+      </>
+    );
   }
 
   const handleLocationClick = (locationId: string, weekEndingDate: string) => {
@@ -299,6 +307,9 @@ function AppContent() {
           })}
         </div>
       </div>
+
+      {/* Global feedback widget: floats over every screen. */}
+      <FeedbackWidget screen={currentTitle} />
     </div>
   );
 }
