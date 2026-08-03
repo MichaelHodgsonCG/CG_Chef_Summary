@@ -255,6 +255,54 @@ async function getMostRecentPLWeek(
   return { lineItems: items };
 }
 
+/**
+ * The upload window a recap baseline may draw from: no later than the
+ * reporting week (so editing an old week never picks up a newer upload) and
+ * no earlier than the fiscal year's first week (so YTD figures never come
+ * from another year). targetEndDate doubles as the isCurrentWeek marker.
+ */
+async function getBaselineWindow(
+  fiscalYear: number,
+  periodNumber: number,
+  weekNumber: number
+): Promise<{ targetEndDate: string | null; yearFirstEndDate: string | null }> {
+  const { data } = await supabase
+    .from('fiscal_calendar')
+    .select('period, week, end_date')
+    .eq('fiscal_year', fiscalYear)
+    .order('end_date', { ascending: true });
+  if (!data || data.length === 0) return { targetEndDate: null, yearFirstEndDate: null };
+  const target = data.find(w => w.period === periodNumber && w.week === weekNumber);
+  return { targetEndDate: target?.end_date ?? null, yearFirstEndDate: data[0].end_date };
+}
+
+async function fetchBaselineUpload(
+  locationId: string,
+  fiscalYear: number,
+  periodNumber: number,
+  weekNumber: number
+): Promise<{ id: string; week_ending_date: string; isCurrentWeek: boolean } | null> {
+  const { targetEndDate, yearFirstEndDate } = await getBaselineWindow(fiscalYear, periodNumber, weekNumber);
+
+  let query = supabase
+    .from('weekly_summary_pl_uploads')
+    .select('id, week_ending_date')
+    .eq('location_id', locationId)
+    .order('week_ending_date', { ascending: false })
+    .limit(1);
+  if (targetEndDate) query = query.lte('week_ending_date', targetEndDate);
+  if (yearFirstEndDate) query = query.gte('week_ending_date', yearFirstEndDate);
+
+  const { data: uploads } = await query;
+  if (!uploads || uploads.length === 0) return null;
+
+  return {
+    id: uploads[0].id,
+    week_ending_date: uploads[0].week_ending_date,
+    isCurrentWeek: !!targetEndDate && uploads[0].week_ending_date === targetEndDate,
+  };
+}
+
 export type LabourPlBaseline = {
   weekEndingDate: string;
   isCurrentWeek: boolean;
@@ -272,16 +320,8 @@ export async function fetchLabourPlBaseline(
   periodNumber: number,
   weekNumber: number
 ): Promise<LabourPlBaseline | null> {
-  const { data: uploads } = await supabase
-    .from('weekly_summary_pl_uploads')
-    .select('id, week_ending_date')
-    .eq('location_id', locationId)
-    .order('week_ending_date', { ascending: false })
-    .limit(1);
-
-  if (!uploads || uploads.length === 0) return null;
-
-  const upload = uploads[0];
+  const upload = await fetchBaselineUpload(locationId, fiscalYear, periodNumber, weekNumber);
+  if (!upload) return null;
 
   const { data: items } = await supabase
     .from('weekly_summary_pl_line_items')
@@ -294,17 +334,9 @@ export async function fetchLabourPlBaseline(
   const sales = items.find(i => i.line_item_name === 'Food Sales');
   const labour = items.find(i => i.line_item_name === 'Kitchen Labour');
 
-  const { data: calWeek } = await supabase
-    .from('fiscal_calendar')
-    .select('end_date')
-    .eq('fiscal_year', fiscalYear)
-    .eq('period', periodNumber)
-    .eq('week', weekNumber)
-    .maybeSingle();
-
   return {
     weekEndingDate: upload.week_ending_date,
-    isCurrentWeek: !!calWeek && calWeek.end_date === upload.week_ending_date,
+    isCurrentWeek: upload.isCurrentWeek,
     periodSalesActual: sales?.current_actual ?? 0,
     periodLabourActual: labour?.current_actual ?? 0,
     periodBudgetPct: labour?.current_budget_pct ?? 0,
@@ -331,16 +363,8 @@ export async function fetchFoodCostPlBaseline(
   periodNumber: number,
   weekNumber: number
 ): Promise<FoodCostPlBaseline | null> {
-  const { data: uploads } = await supabase
-    .from('weekly_summary_pl_uploads')
-    .select('id, week_ending_date')
-    .eq('location_id', locationId)
-    .order('week_ending_date', { ascending: false })
-    .limit(1);
-
-  if (!uploads || uploads.length === 0) return null;
-
-  const upload = uploads[0];
+  const upload = await fetchBaselineUpload(locationId, fiscalYear, periodNumber, weekNumber);
+  if (!upload) return null;
 
   const { data: items } = await supabase
     .from('weekly_summary_pl_line_items')
@@ -353,17 +377,9 @@ export async function fetchFoodCostPlBaseline(
   const sales = items.find(i => i.line_item_name === 'Food Sales');
   const foodCost = items.find(i => i.line_item_name === 'Cost of Sales (Food)');
 
-  const { data: calWeek } = await supabase
-    .from('fiscal_calendar')
-    .select('end_date')
-    .eq('fiscal_year', fiscalYear)
-    .eq('period', periodNumber)
-    .eq('week', weekNumber)
-    .maybeSingle();
-
   return {
     weekEndingDate: upload.week_ending_date,
-    isCurrentWeek: !!calWeek && calWeek.end_date === upload.week_ending_date,
+    isCurrentWeek: upload.isCurrentWeek,
     periodSalesActual: sales?.current_actual ?? 0,
     periodFoodCostActual: foodCost?.current_actual ?? 0,
     periodBudgetPct: foodCost?.current_budget_pct ?? 0,
@@ -388,16 +404,8 @@ export async function fetchSalesPlBaseline(
   periodNumber: number,
   weekNumber: number
 ): Promise<SalesPlBaseline | null> {
-  const { data: uploads } = await supabase
-    .from('weekly_summary_pl_uploads')
-    .select('id, week_ending_date')
-    .eq('location_id', locationId)
-    .order('week_ending_date', { ascending: false })
-    .limit(1);
-
-  if (!uploads || uploads.length === 0) return null;
-
-  const upload = uploads[0];
+  const upload = await fetchBaselineUpload(locationId, fiscalYear, periodNumber, weekNumber);
+  if (!upload) return null;
 
   const { data: items } = await supabase
     .from('weekly_summary_pl_line_items')
@@ -409,17 +417,9 @@ export async function fetchSalesPlBaseline(
 
   const sales = items.find(i => i.line_item_name === 'Food Sales');
 
-  const { data: calWeek } = await supabase
-    .from('fiscal_calendar')
-    .select('end_date')
-    .eq('fiscal_year', fiscalYear)
-    .eq('period', periodNumber)
-    .eq('week', weekNumber)
-    .maybeSingle();
-
   return {
     weekEndingDate: upload.week_ending_date,
-    isCurrentWeek: !!calWeek && calWeek.end_date === upload.week_ending_date,
+    isCurrentWeek: upload.isCurrentWeek,
     periodSalesActual: sales?.current_actual ?? 0,
     periodSalesBudget: sales?.current_budget ?? 0,
     ytdSalesActual: sales?.ytd_actual ?? 0,
