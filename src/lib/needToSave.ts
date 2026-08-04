@@ -427,6 +427,92 @@ export async function fetchSalesPlBaseline(
   };
 }
 
+/**
+ * Derive ytd_* for line items whose source file carried no YTD columns (the
+ * multi-week Excel export has only weekly actuals, which blanked YTD across
+ * every dashboard for XLSX-uploaded weeks). YTD through this week = the fiscal
+ * year's latest upload before this period (its ytd_actual already spans
+ * everything earlier) + this upload's period-cumulative current value. Parsed
+ * YTD values are authoritative — the map only contains entries for items whose
+ * ytd_actual is null, and only when a usable prior baseline exists (or it's
+ * period 1, where YTD simply equals the period figure).
+ */
+export async function computeYtdForUpload(
+  locationId: string,
+  fiscalYear: number,
+  currentPeriod: number,
+  lineItems: { line_item_name: string; current_actual: number | null; current_budget: number | null; ytd_actual: number | null; ytd_budget: number | null }[]
+): Promise<Map<string, { ytd_actual: number | null; ytd_actual_pct: number | null; ytd_budget: number | null; ytd_budget_pct: number | null }>> {
+  const result = new Map<string, { ytd_actual: number | null; ytd_actual_pct: number | null; ytd_budget: number | null; ytd_budget_pct: number | null }>();
+
+  const needsFill = lineItems.filter(i => i.ytd_actual === null);
+  if (needsFill.length === 0) return result;
+
+  const { data: calWeeks } = await supabase
+    .from('fiscal_calendar')
+    .select('period, start_date, end_date')
+    .eq('fiscal_year', fiscalYear)
+    .order('end_date', { ascending: true });
+  if (!calWeeks || calWeeks.length === 0) return result;
+
+  const periodWeeks = calWeeks.filter(w => w.period === currentPeriod);
+  if (periodWeeks.length === 0) return result;
+  const periodStart = periodWeeks[0].start_date;
+  const yearFirstEndDate = calWeeks[0].end_date;
+
+  let priorItems: { line_item_name: string; ytd_actual: number | null; ytd_budget: number | null }[] = [];
+  if (currentPeriod > 1) {
+    const { data: priorUploads } = await supabase
+      .from('weekly_summary_pl_uploads')
+      .select('id')
+      .eq('location_id', locationId)
+      .gte('week_ending_date', yearFirstEndDate)
+      .lt('week_ending_date', periodStart)
+      .order('week_ending_date', { ascending: false })
+      .limit(1);
+    // Past period 1, a missing prior baseline means a derived YTD would only
+    // cover this period — leave those items null rather than mislabel them.
+    if (!priorUploads || priorUploads.length === 0) return result;
+
+    const { data: items } = await supabase
+      .from('weekly_summary_pl_line_items')
+      .select('line_item_name, ytd_actual, ytd_budget')
+      .eq('upload_id', priorUploads[0].id)
+      .in('line_item_name', lineItems.map(i => i.line_item_name));
+    priorItems = items ?? [];
+  }
+
+  const derived = (item: { line_item_name: string; current_actual: number | null; current_budget: number | null; ytd_actual: number | null; ytd_budget: number | null }) => {
+    const prior = priorItems.find(p => p.line_item_name === item.line_item_name);
+    if (currentPeriod > 1 && (!prior || prior.ytd_actual === null)) return null;
+    const ytd_actual = (prior?.ytd_actual ?? 0) + (item.current_actual ?? 0);
+    const ytd_budget = item.current_budget !== null && (currentPeriod === 1 || prior?.ytd_budget !== null)
+      ? (prior?.ytd_budget ?? 0) + item.current_budget
+      : null;
+    return { ytd_actual, ytd_budget };
+  };
+
+  const foodSalesItem = lineItems.find(i => i.line_item_name === 'Food Sales');
+  const salesYtd = foodSalesItem
+    ? foodSalesItem.ytd_actual !== null
+      ? { ytd_actual: foodSalesItem.ytd_actual, ytd_budget: foodSalesItem.ytd_budget }
+      : derived(foodSalesItem)
+    : null;
+
+  for (const item of needsFill) {
+    const d = derived(item);
+    if (!d) continue;
+    result.set(item.line_item_name, {
+      ytd_actual: d.ytd_actual,
+      ytd_actual_pct: salesYtd && salesYtd.ytd_actual ? (d.ytd_actual / salesYtd.ytd_actual) * 100 : null,
+      ytd_budget: d.ytd_budget,
+      ytd_budget_pct: d.ytd_budget !== null && salesYtd && salesYtd.ytd_budget ? (d.ytd_budget / salesYtd.ytd_budget) * 100 : null,
+    });
+  }
+
+  return result;
+}
+
 export async function computeQtdForUpload(
   locationId: string,
   fiscalYear: number,

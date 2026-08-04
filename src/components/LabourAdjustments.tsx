@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { applyPlAdjustment } from '../lib/plAdjustments';
 import { DollarSign, Save, AlertCircle, X } from 'lucide-react';
 
 type Location = {
@@ -90,7 +91,7 @@ export function LabourAdjustments() {
     setAdjustmentValue('');
   };
 
-  const saveAdjustment = async (weekEndingDate: string, lineItemId: string) => {
+  const saveAdjustment = async (lineItemId: string) => {
     const newValue = parseFloat(adjustmentValue);
     if (isNaN(newValue)) {
       setMessage({ type: 'error', text: 'Please enter a valid number' });
@@ -99,114 +100,24 @@ export function LabourAdjustments() {
 
     setLoading(true);
 
-    const { data: lineItem } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('upload_id')
-      .eq('id', lineItemId)
-      .single();
-
-    if (!lineItem) {
-      setMessage({ type: 'error', text: 'Could not find line item' });
-      setLoading(false);
-      return;
-    }
-
-    const { data: foodSales } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('current_actual')
-      .eq('upload_id', lineItem.upload_id)
-      .eq('line_item_name', 'Food Sales')
-      .maybeSingle();
-
-    const foodSalesActual = foodSales?.current_actual || 0;
-    const newPercentage = foodSalesActual > 0 ? (newValue / foodSalesActual) * 100 : null;
-
-    const { error } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .update({
-        current_actual: newValue,
-        current_actual_pct: newPercentage
-      })
-      .eq('id', lineItemId);
+    const { error } = await applyPlAdjustment({
+      lineItemId,
+      locationId: selectedLocation,
+      salesLineItemName: 'Food Sales',
+      newValue,
+    });
 
     if (error) {
-      setMessage({ type: 'error', text: `Error updating: ${error.message}` });
+      setMessage({ type: 'error', text: `Error updating: ${error}` });
       setLoading(false);
       return;
     }
 
-    await updatePTDTotals(weekEndingDate);
-
-    setMessage({ type: 'success', text: 'Labour value updated and PTD totals recalculated' });
+    setMessage({ type: 'success', text: 'Labour value updated; QTD/YTD figures and saved chef summaries refreshed' });
     setEditingWeek(null);
     setAdjustmentValue('');
     await loadWeekData();
     setLoading(false);
-  };
-
-  const updatePTDTotals = async (weekEndingDate: string) => {
-    const currentDate = new Date(weekEndingDate);
-
-    const { data: fiscalPeriod } = await supabase
-      .from('fiscal_calendar')
-      .select('period_start, period_end')
-      .lte('period_start', weekEndingDate)
-      .gte('period_end', weekEndingDate)
-      .maybeSingle();
-
-    if (!fiscalPeriod) return;
-
-    const { data: weeksInPeriod } = await supabase
-      .from('weekly_summary_pl_uploads')
-      .select('id, week_ending_date')
-      .eq('location_id', selectedLocation)
-      .gte('week_ending_date', fiscalPeriod.period_start)
-      .lte('week_ending_date', weekEndingDate)
-      .order('week_ending_date');
-
-    if (!weeksInPeriod || weeksInPeriod.length === 0) return;
-
-    const uploadIds = weeksInPeriod.map(w => w.id);
-
-    const { data: labourItems } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('current_actual, upload_id')
-      .eq('line_item_name', 'Kitchen Labour')
-      .in('upload_id', uploadIds);
-
-    const { data: foodSalesItems } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('current_actual, upload_id')
-      .eq('line_item_name', 'Food Sales')
-      .in('upload_id', uploadIds);
-
-    if (!labourItems || !foodSalesItems) return;
-
-    let runningLabourTotal = 0;
-    let runningSalesTotal = 0;
-
-    for (const week of weeksInPeriod) {
-      const weekLabour = labourItems.find(item => item.upload_id === week.id);
-      const weekSales = foodSalesItems.find(item => item.upload_id === week.id);
-
-      if (weekLabour) {
-        runningLabourTotal += weekLabour.current_actual || 0;
-      }
-      if (weekSales) {
-        runningSalesTotal += weekSales.current_actual || 0;
-      }
-
-      const ytdPercentage = runningSalesTotal > 0 ? (runningLabourTotal / runningSalesTotal) * 100 : null;
-
-      await supabase
-        .from('weekly_summary_pl_line_items')
-        .update({
-          ytd_actual: runningLabourTotal,
-          ytd_actual_pct: ytdPercentage
-        })
-        .eq('line_item_name', 'Kitchen Labour')
-        .eq('upload_id', week.id);
-    }
   };
 
   const formatCurrency = (value: number) => {
@@ -229,7 +140,7 @@ export function LabourAdjustments() {
         <div>
           <h2 className="text-2xl font-bold text-gray-900">BOH Labour Adjustments</h2>
           <p className="text-sm text-gray-600 mt-1">
-            Manually adjust kitchen labour values. PTD totals will be recalculated automatically.
+            Manually adjust kitchen labour values. The week's QTD/YTD figures and saved chef summaries update automatically.
           </p>
         </div>
       </div>
@@ -325,7 +236,7 @@ export function LabourAdjustments() {
                         {editingWeek === week.week_ending_date ? (
                           <div className="flex items-center justify-end gap-2">
                             <button
-                              onClick={() => saveAdjustment(week.week_ending_date, week.line_item_id)}
+                              onClick={() => saveAdjustment(week.line_item_id)}
                               disabled={loading}
                               className="inline-flex items-center gap-1 px-3 py-1 bg-cg-accent text-white rounded hover:bg-cg-accentHover disabled:opacity-50"
                             >

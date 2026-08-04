@@ -3,6 +3,8 @@ import { TrendingUp, TrendingDown, Calendar, ChevronRight, Upload, AlertCircle, 
 import { supabase, Location, PLLineItem, getRegionDisplayName } from '../lib/supabase';
 import { parseCSV, ParsedLineItem } from '../lib/csvParser';
 import { parseExcel } from '../lib/excelParser';
+import { computeQtdForUpload, computeYtdForUpload } from '../lib/needToSave';
+import { refreshSummaryPlFieldsForPeriod } from '../lib/summaryPlFields';
 
 type LocationData = {
   location: Location;
@@ -289,11 +291,30 @@ export default function Dashboard({
 
       if (uploadError) throw uploadError;
 
+      // Same ingest pipeline as UploadPage: compute QTD, fill missing YTD, and
+      // refresh the saved chef summaries for the period afterwards. This path
+      // previously skipped all three, leaving qtd_* null and summaries stale.
+      const { data: calWeek } = await supabase
+        .from('fiscal_calendar')
+        .select('fiscal_year, period')
+        .lte('start_date', weekEndingDate)
+        .gte('end_date', weekEndingDate)
+        .maybeSingle();
+
+      let qtdMap: Map<string, { qtd_actual: number | null; qtd_actual_pct: number | null; qtd_budget: number | null; qtd_budget_pct: number | null }> | null = null;
+      let ytdMap: Map<string, { ytd_actual: number | null; ytd_actual_pct: number | null; ytd_budget: number | null; ytd_budget_pct: number | null }> | null = null;
+      if (calWeek) {
+        qtdMap = await computeQtdForUpload(selectedLocation, calWeek.fiscal_year, calWeek.period, weekEndingDate, lineItems);
+        ytdMap = await computeYtdForUpload(selectedLocation, calWeek.fiscal_year, calWeek.period, lineItems);
+      }
+
       const lineItemsToInsert = lineItems.map(item => ({
         upload_id: upload.id,
         location_id: selectedLocation,
         week_ending_date: weekEndingDate,
-        ...item
+        ...item,
+        ...(qtdMap?.get(item.line_item_name) ?? {}),
+        ...(ytdMap?.get(item.line_item_name) ?? {})
       }));
 
       const { error: itemsError } = await supabase
@@ -301,6 +322,14 @@ export default function Dashboard({
         .insert(lineItemsToInsert);
 
       if (itemsError) throw itemsError;
+
+      if (calWeek) {
+        try {
+          await refreshSummaryPlFieldsForPeriod(selectedLocation, calWeek.fiscal_year, calWeek.period);
+        } catch (e) {
+          console.error('Failed to refresh summary P&L fields after upload', e);
+        }
+      }
 
       setMessage({ type: 'success', text: `Successfully uploaded ${lineItems.length} line items` });
       setFile(null);

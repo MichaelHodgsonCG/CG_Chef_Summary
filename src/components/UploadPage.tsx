@@ -3,7 +3,7 @@ import { Upload, AlertCircle, CheckCircle, AlertTriangle, X } from 'lucide-react
 import { supabase, Location } from '../lib/supabase';
 import { parseCSV, ParsedLineItem } from '../lib/csvParser';
 import { parseExcel, WeekData } from '../lib/excelParser';
-import { computeQtdForUpload } from '../lib/needToSave';
+import { computeQtdForUpload, computeYtdForUpload } from '../lib/needToSave';
 import { refreshSummaryPlFieldsForPeriod, computeSageTrueUpVariance, LocationTrueUp } from '../lib/summaryPlFields';
 
 type ParseResult = {
@@ -377,6 +377,7 @@ export default function UploadPage() {
               .maybeSingle();
 
             let qtdMap: Map<string, { qtd_actual: number | null; qtd_actual_pct: number | null; qtd_budget: number | null; qtd_budget_pct: number | null }> | null = null;
+            let ytdMap: Map<string, { ytd_actual: number | null; ytd_actual_pct: number | null; ytd_budget: number | null; ytd_budget_pct: number | null }> | null = null;
 
             if (calWeek) {
               qtdMap = await computeQtdForUpload(
@@ -386,16 +387,26 @@ export default function UploadPage() {
                 week.weekEndingDate,
                 week.lineItems
               );
+              // Fills YTD only for items the file didn't provide it for (the
+              // multi-week Excel export carries no YTD columns).
+              ytdMap = await computeYtdForUpload(
+                locationId,
+                calWeek.fiscal_year,
+                calWeek.period,
+                week.lineItems
+              );
             }
 
             const lineItemsToInsert = week.lineItems.map(item => {
               const qtd = qtdMap?.get(item.line_item_name);
+              const ytd = ytdMap?.get(item.line_item_name);
               return {
                 upload_id: upload.id,
                 location_id: locationId,
                 week_ending_date: week.weekEndingDate,
                 ...item,
-                ...(qtd ?? {})
+                ...(qtd ?? {}),
+                ...(ytd ?? {})
               };
             });
 
