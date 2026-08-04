@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { applyPlAdjustment } from '../lib/plAdjustments';
 import { DollarSign, Save, AlertCircle, X, UtensilsCrossed, ChefHat } from 'lucide-react';
 
 type Location = {
@@ -23,14 +24,14 @@ const TAB_CONFIG = {
     lineItemName: 'Kitchen Labour',
     salesLineItemName: 'Food Sales',
     columnHeader: 'Kitchen Labour',
-    successText: 'Labour value updated and PTD totals recalculated',
+    successText: 'Labour value updated; QTD/YTD figures and saved chef summaries refreshed',
   },
   'food-cost': {
     label: 'Food Cost',
     lineItemName: 'Cost of Sales (Food)',
     salesLineItemName: 'Food Sales',
     columnHeader: 'Cost of Sales (Food)',
-    successText: 'Food cost value updated and PTD totals recalculated',
+    successText: 'Food cost value updated; QTD/YTD figures and saved chef summaries refreshed',
   },
 } as const;
 
@@ -117,7 +118,7 @@ export function PLAdjustments() {
     setAdjustmentValue('');
   };
 
-  const saveAdjustment = async (weekEndingDate: string, lineItemId: string) => {
+  const saveAdjustment = async (lineItemId: string) => {
     const newValue = parseFloat(adjustmentValue);
     if (isNaN(newValue)) {
       setMessage({ type: 'error', text: 'Please enter a valid number' });
@@ -126,105 +127,24 @@ export function PLAdjustments() {
 
     setLoading(true);
 
-    const { data: lineItem } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('upload_id')
-      .eq('id', lineItemId)
-      .single();
-
-    if (!lineItem) {
-      setMessage({ type: 'error', text: 'Could not find line item' });
-      setLoading(false);
-      return;
-    }
-
-    const { data: foodSales } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('current_actual')
-      .eq('upload_id', lineItem.upload_id)
-      .eq('line_item_name', config.salesLineItemName)
-      .maybeSingle();
-
-    const salesActual = foodSales?.current_actual || 0;
-    const newPercentage = salesActual > 0 ? (newValue / salesActual) * 100 : null;
-
-    const { error } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .update({
-        current_actual: newValue,
-        current_actual_pct: newPercentage,
-      })
-      .eq('id', lineItemId);
+    const { error } = await applyPlAdjustment({
+      lineItemId,
+      locationId: selectedLocation,
+      salesLineItemName: config.salesLineItemName,
+      newValue,
+    });
 
     if (error) {
-      setMessage({ type: 'error', text: `Error updating: ${error.message}` });
+      setMessage({ type: 'error', text: `Error updating: ${error}` });
       setLoading(false);
       return;
     }
-
-    await updatePTDTotals(weekEndingDate, lineItemId);
 
     setMessage({ type: 'success', text: config.successText });
     setEditingWeek(null);
     setAdjustmentValue('');
     await loadWeekData();
     setLoading(false);
-  };
-
-  const updatePTDTotals = async (weekEndingDate: string, _lineItemId: string) => {
-    const { data: fiscalPeriod } = await supabase
-      .from('fiscal_calendar')
-      .select('period_start, period_end')
-      .lte('period_start', weekEndingDate)
-      .gte('period_end', weekEndingDate)
-      .maybeSingle();
-
-    if (!fiscalPeriod) return;
-
-    const { data: weeksInPeriod } = await supabase
-      .from('weekly_summary_pl_uploads')
-      .select('id, week_ending_date')
-      .eq('location_id', selectedLocation)
-      .gte('week_ending_date', fiscalPeriod.period_start)
-      .lte('week_ending_date', weekEndingDate)
-      .order('week_ending_date');
-
-    if (!weeksInPeriod || weeksInPeriod.length === 0) return;
-
-    const uploadIds = weeksInPeriod.map(w => w.id);
-
-    const { data: costItems } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('current_actual, upload_id')
-      .eq('line_item_name', config.lineItemName)
-      .in('upload_id', uploadIds);
-
-    const { data: salesItems } = await supabase
-      .from('weekly_summary_pl_line_items')
-      .select('current_actual, upload_id')
-      .eq('line_item_name', config.salesLineItemName)
-      .in('upload_id', uploadIds);
-
-    if (!costItems || !salesItems) return;
-
-    let runningCostTotal = 0;
-    let runningSalesTotal = 0;
-
-    for (const week of weeksInPeriod) {
-      const weekCost = costItems.find(item => item.upload_id === week.id);
-      const weekSales = salesItems.find(item => item.upload_id === week.id);
-
-      if (weekCost) runningCostTotal += weekCost.current_actual || 0;
-      if (weekSales) runningSalesTotal += weekSales.current_actual || 0;
-
-      const ytdPercentage = runningSalesTotal > 0 ? (runningCostTotal / runningSalesTotal) * 100 : null;
-
-      await supabase
-        .from('weekly_summary_pl_line_items')
-        .update({ ytd_actual: runningCostTotal, ytd_actual_pct: ytdPercentage })
-        .eq('line_item_name', config.lineItemName)
-        .eq('upload_id', week.id);
-    }
   };
 
   const formatCurrency = (value: number) =>
@@ -238,7 +158,7 @@ export function PLAdjustments() {
       <div>
         <h2 className="text-2xl font-bold text-slate-900">P&L Adjustments</h2>
         <p className="text-sm text-slate-500 mt-1">
-          Manually correct P&L line item values. PTD totals are recalculated automatically.
+          Manually correct P&L line item values. The week's QTD/YTD figures and saved chef summaries update automatically.
         </p>
       </div>
 
@@ -354,7 +274,7 @@ export function PLAdjustments() {
                         {editingWeek === week.week_ending_date ? (
                           <div className="flex items-center justify-end gap-2">
                             <button
-                              onClick={() => saveAdjustment(week.week_ending_date, week.line_item_id)}
+                              onClick={() => saveAdjustment(week.line_item_id)}
                               disabled={loading}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-cg-accent text-white rounded-lg hover:bg-cg-accentHover disabled:opacity-50 text-sm font-medium transition-colors"
                             >

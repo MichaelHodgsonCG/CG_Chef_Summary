@@ -26,7 +26,9 @@ function getQuarterPeriods(p: number): number[] {
   if (p <= 3) return [1, 2, 3];
   if (p <= 6) return [4, 5, 6];
   if (p <= 9) return [7, 8, 9];
-  return [10, 11, 12];
+  // The fiscal year has 13 periods; Q4 is 10-13 (matches needToSave.ts,
+  // WeeklyExecutiveReport and WeeklyChefSummary).
+  return [10, 11, 12, 13];
 }
 
 type PlItem = {
@@ -64,10 +66,12 @@ export type ChefWeekActuals = {
  *     (reconciled Sage — the truth).
  *   - Otherwise, when chefActuals are supplied, PTD is estimated as the latest
  *     prior-week P&L period-to-date plus this week's chef actuals, so the
- *     Monday report isn't blank while accounting catches up. It flips to Sage
- *     automatically the moment this week's P&L is uploaded.
+ *     Monday report isn't blank while accounting catches up. Weeks the P&L
+ *     hasn't reached yet are filled from saved chef summaries. It flips to
+ *     Sage automatically the moment this week's P&L is uploaded.
  *
- * Returns null when there's no P&L for the quarter yet.
+ * Returns null when there's no P&L for the quarter and no chefActuals to
+ * estimate from (budgets and QTD are zero in the estimate-only case).
  */
 export async function computePlDrivenSummaryFields(
   locationId: string,
@@ -88,23 +92,29 @@ export async function computePlDrivenSummaryFields(
   if (!calWeeks || calWeeks.length === 0) return null;
 
   const quarterEndDates = calWeeks.map((w) => w.end_date);
-  const { data: uploads } = await supabase
+  const { data: uploadRows } = await supabase
     .from('weekly_summary_pl_uploads')
     .select('id, week_ending_date')
     .eq('location_id', locationId)
     .in('week_ending_date', quarterEndDates)
     .order('week_ending_date', { ascending: true });
-  if (!uploads || uploads.length === 0) return null;
+  const uploads = uploadRows ?? [];
 
-  const uploadIds = uploads.map((u) => u.id);
-  const { data: lineItems } = await supabase
-    .from('weekly_summary_pl_line_items')
-    .select('upload_id, line_item_name, current_actual, current_budget, current_actual_pct, current_budget_pct')
-    .in('upload_id', uploadIds)
-    .in('line_item_name', ['Food Sales', 'Cost of Sales (Food)', 'Kitchen Labour']);
-  if (!lineItems || lineItems.length === 0) return null;
+  let items: PlItem[] = [];
+  if (uploads.length > 0) {
+    const uploadIds = uploads.map((u) => u.id);
+    const { data: lineItems } = await supabase
+      .from('weekly_summary_pl_line_items')
+      .select('upload_id, line_item_name, current_actual, current_budget, current_actual_pct, current_budget_pct')
+      .in('upload_id', uploadIds)
+      .in('line_item_name', ['Food Sales', 'Cost of Sales (Food)', 'Kitchen Labour']);
+    items = (lineItems ?? []) as PlItem[];
+  }
 
-  const items = lineItems as PlItem[];
+  // Without any P&L in the quarter the budgets/QTD below are all zero, but the
+  // PTD estimate can still run from chef actuals — so only bail when there's
+  // nothing to estimate from either.
+  if (items.length === 0 && !chefActuals) return null;
   const periodOf = (endDate: string) => calWeeks.find((c) => c.end_date === endDate)?.period;
   const itemFor = (uploadId: string, name: string) =>
     items.find((i) => i.upload_id === uploadId && i.line_item_name === name);
@@ -165,17 +175,38 @@ export async function computePlDrivenSummaryFields(
   } else if (chefActuals) {
     // No P&L for this week yet — estimate PTD so the Monday report isn't blank.
     // periodUploads are all prior weeks here (this week's upload is absent), so
-    // the latest one carries period-to-date actuals through last week.
+    // the latest one carries period-to-date actuals through its own week.
     const weekEndOf = calWeek?.end_date;
     const priorInPeriod = periodUploads.filter((u) => !weekEndOf || u.week_ending_date < weekEndOf);
     let priorSales = 0;
     let priorFoodCost = 0;
     let priorLabour = 0;
+    // Period-week the Sage figures run through (0 = no P&L in the period yet).
+    let sageCoveredWeek = 0;
     if (priorInPeriod.length > 0) {
-      const latestPriorId = priorInPeriod[priorInPeriod.length - 1].id;
-      priorSales = itemFor(latestPriorId, 'Food Sales')?.current_actual || 0;
-      priorFoodCost = itemFor(latestPriorId, 'Cost of Sales (Food)')?.current_actual || 0;
-      priorLabour = itemFor(latestPriorId, 'Kitchen Labour')?.current_actual || 0;
+      const latestPrior = priorInPeriod[priorInPeriod.length - 1];
+      priorSales = itemFor(latestPrior.id, 'Food Sales')?.current_actual || 0;
+      priorFoodCost = itemFor(latestPrior.id, 'Cost of Sales (Food)')?.current_actual || 0;
+      priorLabour = itemFor(latestPrior.id, 'Kitchen Labour')?.current_actual || 0;
+      sageCoveredWeek = calWeeks.find((c) => c.end_date === latestPrior.week_ending_date)?.week ?? 0;
+    }
+    // When the P&L lags more than one week (or the period has none), the weeks
+    // between Sage coverage and this week come from saved chef summaries so
+    // the estimate doesn't silently drop them.
+    if (week - sageCoveredWeek > 1) {
+      const { data: gapWeeks } = await supabase
+        .from('weekly_summary_chef_summary')
+        .select('food_sales_labour_push, usage_amount, labour_spent')
+        .eq('location_id', locationId)
+        .eq('fiscal_year', fiscalYear)
+        .eq('period_number', period)
+        .gt('week_number', sageCoveredWeek)
+        .lt('week_number', week);
+      for (const g of gapWeeks ?? []) {
+        priorSales += g.food_sales_labour_push || 0;
+        priorFoodCost += g.usage_amount || 0;
+        priorLabour += g.labour_spent || 0;
+      }
     }
     const ptdSales = priorSales + chefActuals.salesPush;
     const ptdFoodCost = priorFoodCost + chefActuals.usageAmount;

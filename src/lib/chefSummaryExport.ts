@@ -125,6 +125,14 @@ interface WeeklySummaryData {
   development_path_updates: string;
   feature_items: FeatureItem[];
   ai_summary?: string;
+  // YTD figures from the guided recap steps (estimated from the latest P&L
+  // baseline plus the week's chef numbers when this week's upload isn't in yet).
+  recap_sales_ytd_actual?: number;
+  recap_sales_ytd_budget?: number;
+  recap_fc_ytd_pct?: number;
+  recap_fc_ytd_budget_pct?: number;
+  recap_labour_ytd_pct?: number;
+  recap_labour_ytd_budget_pct?: number;
 }
 
 function pct(val: number) {
@@ -334,6 +342,13 @@ export function exportChefSummaryToPdf(
   const qtdSalesActual = data.sage_food_sales_qtd;
   const qtdSalesBudget = data.sage_sales_budget_qtd;
   const qtdSalesVariancePct = qtdSalesBudget > 0 ? ((qtdSalesActual - qtdSalesBudget) / qtdSalesBudget) * 100 : 0;
+  const ytdSalesActual = data.recap_sales_ytd_actual ?? 0;
+  const ytdSalesBudget = data.recap_sales_ytd_budget ?? 0;
+  const ytdSalesVariancePct = ytdSalesBudget > 0 ? ((ytdSalesActual - ytdSalesBudget) / ytdSalesBudget) * 100 : 0;
+  const ytdFcPct = data.recap_fc_ytd_pct ?? 0;
+  const ytdFcBudgetPct = data.recap_fc_ytd_budget_pct ?? 0;
+  const ytdLabourPct = data.recap_labour_ytd_pct ?? 0;
+  const ytdLabourBudgetPct = data.recap_labour_ytd_budget_pct ?? 0;
 
   // ---------- PAGE 1: RESTAURANT PERFORMANCE ----------
 
@@ -417,18 +432,19 @@ export function exportChefSummaryToPdf(
 
   autoTable(doc, {
     startY: y,
-    head: [['Sales', 'WTD', 'PTD', 'QTD']],
+    head: [['Sales', 'WTD', 'PTD', 'QTD', 'YTD']],
     body: [
-      ['Actual', currencyWhole(wtdSalesActual), currencyWhole(ptdSalesActual), currencyWhole(qtdSalesActual)],
-      ['Budget', currencyWhole(wtdSalesBudget), currencyWhole(ptdSalesBudget), currencyWhole(qtdSalesBudget)],
+      ['Actual', currencyWhole(wtdSalesActual), currencyWhole(ptdSalesActual), currencyWhole(qtdSalesActual), currencyWhole(ytdSalesActual)],
+      ['Budget', currencyWhole(wtdSalesBudget), currencyWhole(ptdSalesBudget), currencyWhole(qtdSalesBudget), currencyWhole(ytdSalesBudget)],
       [
         'Variance %',
         { content: pct(wtdSalesVariancePct), styles: { textColor: varianceColor(wtdSalesVariancePct, true) } },
         { content: pct(ptdSalesVariancePct), styles: { textColor: varianceColor(ptdSalesVariancePct, true) } },
         { content: pct(qtdSalesVariancePct), styles: { textColor: varianceColor(qtdSalesVariancePct, true) } },
+        { content: pct(ytdSalesVariancePct), styles: { textColor: varianceColor(ytdSalesVariancePct, true) } },
       ],
     ],
-    styles: { fontSize: 7.5, cellPadding: 3, halign: 'center' },
+    styles: { fontSize: 6.8, cellPadding: 2.5, halign: 'center' },
     headStyles,
     columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
     margin: { left: margin, right: margin + trendColWidth * 2 + gap * 2 },
@@ -438,19 +454,20 @@ export function exportChefSummaryToPdf(
 
   autoTable(doc, {
     startY: y,
-    head: [['Food Cost', 'WTD', 'PTD', 'QTD']],
+    head: [['Food Cost', 'WTD', 'PTD', 'QTD', 'YTD']],
     body: [
-      ['Actual %', pct(wtdFcPct), pct(data.food_cost_ptd_pct), pct(data.fc_qtd_pct)],
-      ['Theoretical %', pct(theoreticalFoodCostPct), pct(data.theoretical_fc_ptd_pct), pct(data.theoretical_fc_qtd_pct)],
-      ['Budget %', pct(data.budget_food_cost_pct), pct(data.budget_food_cost_pct), pct(data.budget_food_cost_qtd_pct)],
+      ['Actual %', pct(wtdFcPct), pct(data.food_cost_ptd_pct), pct(data.fc_qtd_pct), pct(ytdFcPct)],
+      ['Theoretical %', pct(theoreticalFoodCostPct), pct(data.theoretical_fc_ptd_pct), pct(data.theoretical_fc_qtd_pct), '—'],
+      ['Budget %', pct(data.budget_food_cost_pct), pct(data.budget_food_cost_pct), pct(data.budget_food_cost_qtd_pct), pct(ytdFcBudgetPct)],
       [
         'Gap (Act-Theo)',
         { content: pct(actualFoodCostPct - theoreticalFoodCostPct), styles: { textColor: varianceColor(actualFoodCostPct - theoreticalFoodCostPct, false) } },
         { content: pct(data.food_cost_ptd_pct - data.theoretical_fc_ptd_pct), styles: { textColor: varianceColor(data.food_cost_ptd_pct - data.theoretical_fc_ptd_pct, false) } },
         { content: pct(data.fc_qtd_pct - data.theoretical_fc_qtd_pct), styles: { textColor: varianceColor(data.fc_qtd_pct - data.theoretical_fc_qtd_pct, false) } },
+        '—',
       ],
     ],
-    styles: { fontSize: 7.5, cellPadding: 3, halign: 'center' },
+    styles: { fontSize: 6.8, cellPadding: 2.5, halign: 'center' },
     headStyles,
     columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
     margin: { left: margin + trendColWidth + gap, right: margin + trendColWidth + gap },
@@ -460,18 +477,19 @@ export function exportChefSummaryToPdf(
 
   autoTable(doc, {
     startY: y,
-    head: [['Labour', 'WTD', 'PTD', 'QTD']],
+    head: [['Labour', 'WTD', 'PTD', 'QTD', 'YTD']],
     body: [
-      ['Actual %', pct(wtdLabourPct), pct(data.labour_cost_ptd_pct), pct(data.labour_qtd_pct)],
-      ['Budget %', pct(data.labour_budget_pct), pct(data.labour_budget_pct), pct(data.sage_labour_budget_qtd_pct)],
+      ['Actual %', pct(wtdLabourPct), pct(data.labour_cost_ptd_pct), pct(data.labour_qtd_pct), pct(ytdLabourPct)],
+      ['Budget %', pct(data.labour_budget_pct), pct(data.labour_budget_pct), pct(data.sage_labour_budget_qtd_pct), pct(ytdLabourBudgetPct)],
       [
         'Variance %',
         { content: pct(lcVariance), styles: { textColor: varianceColor(lcVariance, false) } },
         { content: pct(data.labour_cost_ptd_pct - data.labour_budget_pct), styles: { textColor: varianceColor(data.labour_cost_ptd_pct - data.labour_budget_pct, false) } },
         { content: pct(data.labour_qtd_pct - data.sage_labour_budget_qtd_pct), styles: { textColor: varianceColor(data.labour_qtd_pct - data.sage_labour_budget_qtd_pct, false) } },
+        { content: pct(ytdLabourPct - ytdLabourBudgetPct), styles: { textColor: varianceColor(ytdLabourPct - ytdLabourBudgetPct, false) } },
       ],
     ],
-    styles: { fontSize: 7.5, cellPadding: 3, halign: 'center' },
+    styles: { fontSize: 6.8, cellPadding: 2.5, halign: 'center' },
     headStyles,
     columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
     margin: { left: margin + (trendColWidth + gap) * 2, right: margin },

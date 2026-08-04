@@ -360,7 +360,15 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
     labour_qtd_pct: number;
     labour_cost_ptd_pct: number;
   } | null> => {
-    const fields = await computePlDrivenSummaryFields(locId, fiscalYear, periodNumber, weekNumber);
+    // Zero chef actuals: the chef hasn't entered this week's numbers yet, so
+    // the prefill shows PTD through last week (prior Sage upload plus any
+    // saved chef weeks) instead of blanks. handleSave recomputes with the
+    // real actuals.
+    const fields = await computePlDrivenSummaryFields(locId, fiscalYear, periodNumber, weekNumber, {
+      salesPush: 0,
+      usageAmount: 0,
+      labourSpent: 0,
+    });
     if (!fields) return null;
     return {
       budget_food_sales_period: fields.budget_food_sales_period,
@@ -471,6 +479,15 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
         result.budget_food_sales_period = prev.budget_food_sales_period;
         result.budget_food_cost_pct = prev.budget_food_cost_pct;
         result.labour_budget_pct = prev.labour_budget_pct;
+      }
+
+      // The P&L result can carry zero budgets when the period has no upload
+      // yet (e.g. week 1 of a new period) — keep last week's budgets as the
+      // placeholder until the first upload of the period back-fills them.
+      if (plData && prev) {
+        if (!plData.budget_food_sales_period) result.budget_food_sales_period = prev.budget_food_sales_period;
+        if (!plData.budget_food_cost_pct) result.budget_food_cost_pct = prev.budget_food_cost_pct;
+        if (!plData.labour_budget_pct) result.labour_budget_pct = prev.labour_budget_pct;
       }
 
       if (prev) {
