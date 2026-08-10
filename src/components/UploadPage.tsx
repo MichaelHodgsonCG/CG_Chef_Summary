@@ -241,7 +241,14 @@ export default function UploadPage() {
         const fs = wk.lineItems.find(li => li.line_item_name === 'Food Sales');
         const fc = wk.lineItems.find(li => li.line_item_name === 'Cost of Sales (Food)');
         const lab = wk.lineItems.find(li => li.line_item_name === 'Kitchen Labour');
-        const foodCostPct = fc?.current_actual_pct ?? null;
+        // Budget-only mode ingests the budget figures, so preview those (not the
+        // actuals we're discarding) — otherwise the reviewer can't verify the
+        // budgets that will actually load.
+        const foodSales = budgetOnly ? (fs?.current_budget ?? null) : (fs?.current_actual ?? null);
+        const foodCost = budgetOnly ? (fc?.current_budget ?? null) : (fc?.current_actual ?? null);
+        const foodCostPct = budgetOnly ? (fc?.current_budget_pct ?? null) : (fc?.current_actual_pct ?? null);
+        const labour = budgetOnly ? (lab?.current_budget ?? null) : (lab?.current_actual ?? null);
+        const labourPct = budgetOnly ? (lab?.current_budget_pct ?? null) : (lab?.current_actual_pct ?? null);
 
         const issues: string[] = [];
         if (r.errors && r.errors.length > 0) issues.push(...r.errors);
@@ -249,7 +256,8 @@ export default function UploadPage() {
         if (!wk.weekEndingDate) issues.push('No week ending date');
         if (!fs) issues.push('Missing Food Sales line');
         if (!fc) issues.push('Missing Cost of Sales (Food) line');
-        if (fcOutOfBand(foodCostPct)) issues.push(`Food cost ${foodCostPct?.toFixed(1)}% looks unusual — verify the source`);
+        // Budgets are stable planning figures — don't flag them as "unusual".
+        if (!budgetOnly && fcOutOfBand(foodCostPct)) issues.push(`Food cost ${foodCostPct?.toFixed(1)}% looks unusual — verify the source`);
 
         rows.push({
           key: `${pf.fileName}|${wk.weekEndingDate}`,
@@ -258,17 +266,17 @@ export default function UploadPage() {
           locationMatched: !!matched,
           willCreate,
           weekEndingDate: wk.weekEndingDate || '—',
-          foodSales: fs?.current_actual ?? null,
-          foodCost: fc?.current_actual ?? null,
+          foodSales,
+          foodCost,
           foodCostPct,
-          labour: lab?.current_actual ?? null,
-          labourPct: lab?.current_actual_pct ?? null,
+          labour,
+          labourPct,
           issues,
         });
       }
     }
     return rows;
-  }, [parsedFiles, locations, selectedLocation, weekEndingDate]);
+  }, [parsedFiles, locations, selectedLocation, weekEndingDate, budgetOnly]);
 
   const flaggedCount = previewRows.filter(r => r.issues.length > 0).length;
 
@@ -715,18 +723,18 @@ function IngestReviewCard({
             <tr className="text-cg-faint">
               <th className="px-4 py-2 text-left font-medium">Location</th>
               <th className="px-4 py-2 text-left font-medium">Week Ending</th>
-              <th className="px-4 py-2 text-right font-medium">Food Sales</th>
-              <th className="px-4 py-2 text-right font-medium">Cost of Sales</th>
-              <th className="px-4 py-2 text-right font-medium">FC %</th>
-              <th className="px-4 py-2 text-right font-medium">Kitchen Labour</th>
-              <th className="px-4 py-2 text-right font-medium">Lab %</th>
+              <th className="px-4 py-2 text-right font-medium">{budgetOnly ? 'Food Sales (Bgt)' : 'Food Sales'}</th>
+              <th className="px-4 py-2 text-right font-medium">{budgetOnly ? 'Cost of Sales (Bgt)' : 'Cost of Sales'}</th>
+              <th className="px-4 py-2 text-right font-medium">{budgetOnly ? 'FC % (Bgt)' : 'FC %'}</th>
+              <th className="px-4 py-2 text-right font-medium">{budgetOnly ? 'Kitchen Labour (Bgt)' : 'Kitchen Labour'}</th>
+              <th className="px-4 py-2 text-right font-medium">{budgetOnly ? 'Lab % (Bgt)' : 'Lab %'}</th>
               <th className="px-4 py-2 text-left font-medium">File</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
               const flagged = r.issues.length > 0;
-              const fcBad = fcOutOfBand(r.foodCostPct);
+              const fcBad = !budgetOnly && fcOutOfBand(r.foodCostPct);
               return (
                 <tr key={r.key} className={`border-t border-cg-border ${flagged ? 'bg-amber-50' : ''}`}>
                   <td className="px-4 py-2 text-cg-text font-medium whitespace-nowrap">
