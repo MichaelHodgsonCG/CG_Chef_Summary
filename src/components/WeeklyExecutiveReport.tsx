@@ -375,7 +375,7 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
       // date — the "calculation" source when a finalized P&L isn't in yet.
       const { data: fyChefRowsRaw } = await supabase
         .from('weekly_summary_chef_summary')
-        .select('location_id, period_number, week_number, food_sales_labour_push, food_sales_silverware, usage_amount, labour_spent, locations!inner(code, exclude_from_reporting)')
+        .select('location_id, period_number, week_number, food_sales_labour_push, usage_amount, labour_spent, locations!inner(code, exclude_from_reporting)')
         .eq('fiscal_year', fiscalYear)
         .eq('locations.exclude_from_reporting', false);
       const toDateRows = (fyChefRowsRaw || []).filter((cs: any) =>
@@ -1531,7 +1531,7 @@ function ConsolidatedSummaries({ fiscalYear, period, week }: { fiscalYear: numbe
     // current period's weekly actuals, YTD sums the whole year to date.
     const { data: fyChefRowsRaw } = await supabase
       .from('weekly_summary_chef_summary')
-      .select('location_id, period_number, week_number, food_sales_labour_push, food_sales_silverware, usage_amount, labour_spent, locations!inner(code, exclude_from_reporting)')
+      .select('location_id, period_number, week_number, food_sales_labour_push, usage_amount, labour_spent, locations!inner(code, exclude_from_reporting)')
       .eq('fiscal_year', fiscalYear)
       .eq('locations.exclude_from_reporting', false);
     const toDateRows = (fyChefRowsRaw || []).filter((cs: any) =>
