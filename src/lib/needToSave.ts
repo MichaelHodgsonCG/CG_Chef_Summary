@@ -286,7 +286,7 @@ async function fetchBaselineUpload(
 
   let query = supabase
     .from('weekly_summary_pl_uploads')
-    .select('id, week_ending_date')
+    .select('id, week_ending_date, is_budget_only')
     .eq('location_id', locationId)
     .order('week_ending_date', { ascending: false })
     .limit(1);
@@ -296,10 +296,16 @@ async function fetchBaselineUpload(
   const { data: uploads } = await query;
   if (!uploads || uploads.length === 0) return null;
 
+  // A budget-only upload carries the period's budget but no reconciled actuals,
+  // so it is NEVER the authoritative current-week actual: force isCurrentWeek
+  // false so PTD/YTD accumulate from the chef's own weekly usage (the upload's
+  // actuals are zero) while the budget % is still read from it.
+  const isBudgetOnly = !!uploads[0].is_budget_only;
+
   return {
     id: uploads[0].id,
     week_ending_date: uploads[0].week_ending_date,
-    isCurrentWeek: !!targetEndDate && uploads[0].week_ending_date === targetEndDate,
+    isCurrentWeek: !isBudgetOnly && !!targetEndDate && uploads[0].week_ending_date === targetEndDate,
   };
 }
 

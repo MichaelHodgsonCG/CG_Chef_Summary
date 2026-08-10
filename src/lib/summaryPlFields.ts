@@ -94,7 +94,7 @@ export async function computePlDrivenSummaryFields(
   const quarterEndDates = calWeeks.map((w) => w.end_date);
   const { data: uploadRows } = await supabase
     .from('weekly_summary_pl_uploads')
-    .select('id, week_ending_date')
+    .select('id, week_ending_date, is_budget_only')
     .eq('location_id', locationId)
     .in('week_ending_date', quarterEndDates)
     .order('week_ending_date', { ascending: true });
@@ -166,7 +166,9 @@ export async function computePlDrivenSummaryFields(
   let labour_cost_ptd_pct = 0;
   let sales_ptd_actual = 0;
   const calWeek = calWeeks.find((c) => c.period === period && c.week === week);
-  const weekUpload = calWeek ? uploads.find((u) => u.week_ending_date === calWeek.end_date) : undefined;
+  // Budget-only uploads carry no reconciled actuals, so they never count as the
+  // authoritative week/prior actual — PTD then estimates from chef actuals.
+  const weekUpload = calWeek ? uploads.find((u) => u.week_ending_date === calWeek.end_date && !u.is_budget_only) : undefined;
   if (weekUpload) {
     // Reconciled Sage for this week exists — it is the truth.
     food_cost_ptd_pct = itemFor(weekUpload.id, 'Cost of Sales (Food)')?.current_actual_pct || 0;
@@ -177,7 +179,7 @@ export async function computePlDrivenSummaryFields(
     // periodUploads are all prior weeks here (this week's upload is absent), so
     // the latest one carries period-to-date actuals through its own week.
     const weekEndOf = calWeek?.end_date;
-    const priorInPeriod = periodUploads.filter((u) => !weekEndOf || u.week_ending_date < weekEndOf);
+    const priorInPeriod = periodUploads.filter((u) => (!weekEndOf || u.week_ending_date < weekEndOf) && !u.is_budget_only);
     let priorSales = 0;
     let priorFoodCost = 0;
     let priorLabour = 0;
