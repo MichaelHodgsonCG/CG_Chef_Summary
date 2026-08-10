@@ -349,6 +349,17 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
         .eq('locations.exclude_from_reporting', false)
         : { data: null };
 
+      // Which locations have a FINALIZED (non-budget-only) P&L for this week.
+      // Only those use the reconciled P&L actual for PTD/YTD; every other
+      // location's PTD/YTD is calculated from the chef summaries. A budget-only
+      // P&L counts as "no actual", so its budgets are used but not its actuals.
+      const { data: weekUploads } = weekEndingDate ? await supabase
+        .from('weekly_summary_pl_uploads')
+        .select('location_id, is_budget_only')
+        .eq('week_ending_date', weekEndingDate)
+        : { data: null };
+      const realPlLocSet = new Set((weekUploads || []).filter(u => !u.is_budget_only).map(u => u.location_id));
+
       // Fetch weekly chef summaries
       const { data: currentWeekData } = await supabase
         .from('weekly_summary_chef_summary')
@@ -358,6 +369,19 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
         .eq('week_number', week)
         .eq('locations.exclude_from_reporting', false)
         .order('locations(code)');
+
+      // Fiscal-year-to-date chef summaries (weeks up to this period/week) so PTD
+      // sums the current period's weekly actuals and YTD sums the whole year to
+      // date — the "calculation" source when a finalized P&L isn't in yet.
+      const { data: fyChefRowsRaw } = await supabase
+        .from('weekly_summary_chef_summary')
+        .select('location_id, period_number, week_number, food_sales_labour_push, food_sales_silverware, usage_amount, labour_spent, locations!inner(code, exclude_from_reporting)')
+        .eq('fiscal_year', fiscalYear)
+        .eq('locations.exclude_from_reporting', false);
+      const toDateRows = (fyChefRowsRaw || []).filter((cs: any) =>
+        cs.period_number < period || (cs.period_number === period && cs.week_number <= week));
+      const weeklySales = (cs: any) => Number(cs.food_sales_labour_push || cs.food_sales_silverware || 0);
+      const sumBy = (rows: any[], f: (cs: any) => number) => rows.reduce((s, cs) => s + f(cs), 0);
 
       // Fetch QTD P&L sales
       const { data: qtdPLDataRaw } = qtdEndDates.length > 0 ? await supabase
@@ -491,46 +515,65 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
       // isn't uploaded yet contribute their chef-summary estimates (PTD snapshot
       // fields + recap YTD) so brand totals aren't missing stores on Monday.
       const buildConsolidated = (codes: string[]) => {
-        const filtered = (plData || []).filter(pl => codes.includes(pl.locations.code));
-        const locIds = [...new Set(filtered.map(pl => pl.location_id))];
-        const estRows = (currentWeekData || []).filter(cs =>
-          codes.includes(cs.locations.code) && !locIds.includes(cs.location_id));
-        if (locIds.length === 0 && estRows.length === 0) return null;
         const getVal = (locId: string, name: string, field: string) => {
           const item = (plData || []).find(pl => pl.location_id === locId && pl.line_item_name === name);
           return item ? (parseFloat(item[field]) || 0) : 0;
         };
-        const est = estRows.reduce((acc, cs) => {
-          const eptdSales = Number(cs.sales_ptd_actual || 0);
-          const eptdBudget = Number(cs.budget_food_sales_period || 0);
-          const eytdSales = Number(cs.recap_sales_ytd_actual || 0);
-          const eytdBudget = Number(cs.recap_sales_ytd_budget || 0);
-          acc.ptdSales += eptdSales;
-          acc.ptdBudget += eptdBudget;
-          acc.ptdFC += (Number(cs.food_cost_ptd_pct || 0) / 100) * eptdSales;
-          acc.ptdFCBudget += (Number(cs.budget_food_cost_pct || 0) / 100) * eptdBudget;
-          acc.ptdLab += (Number(cs.labour_cost_ptd_pct || 0) / 100) * eptdSales;
-          acc.ptdLabBudget += (Number(cs.labour_budget_pct || 0) / 100) * eptdBudget;
-          acc.ytdSales += eytdSales;
-          acc.ytdBudget += eytdBudget;
-          acc.ytdFC += (Number(cs.recap_fc_ytd_pct || 0) / 100) * eytdSales;
-          acc.ytdFCBudget += (Number(cs.recap_fc_ytd_budget_pct || 0) / 100) * eytdBudget;
-          acc.ytdLab += (Number(cs.recap_labour_ytd_pct || 0) / 100) * eytdSales;
-          acc.ytdLabBudget += (Number(cs.recap_labour_ytd_budget_pct || 0) / 100) * eytdBudget;
-          return acc;
-        }, { ptdSales: 0, ptdBudget: 0, ptdFC: 0, ptdFCBudget: 0, ptdLab: 0, ptdLabBudget: 0, ytdSales: 0, ytdBudget: 0, ytdFC: 0, ytdFCBudget: 0, ytdLab: 0, ytdLabBudget: 0 });
-        const ptdSales = locIds.reduce((s, id) => s + getVal(id, 'Food Sales', 'current_actual'), 0) + est.ptdSales;
-        const ptdBudget = locIds.reduce((s, id) => s + getVal(id, 'Food Sales', 'current_budget'), 0) + est.ptdBudget;
-        const ytdSales = locIds.reduce((s, id) => s + getVal(id, 'Food Sales', 'ytd_actual'), 0) + est.ytdSales;
-        const ytdBudget = locIds.reduce((s, id) => s + getVal(id, 'Food Sales', 'ytd_budget'), 0) + est.ytdBudget;
-        const ptdFC = locIds.reduce((s, id) => s + getVal(id, 'Cost of Sales (Food)', 'current_actual'), 0) + est.ptdFC;
-        const ptdFCBudget = locIds.reduce((s, id) => s + getVal(id, 'Cost of Sales (Food)', 'current_budget'), 0) + est.ptdFCBudget;
-        const ytdFC = locIds.reduce((s, id) => s + getVal(id, 'Cost of Sales (Food)', 'ytd_actual'), 0) + est.ytdFC;
-        const ytdFCBudget = locIds.reduce((s, id) => s + getVal(id, 'Cost of Sales (Food)', 'ytd_budget'), 0) + est.ytdFCBudget;
-        const ptdLab = locIds.reduce((s, id) => s + getVal(id, 'Kitchen Labour', 'current_actual'), 0) + est.ptdLab;
-        const ptdLabBudget = locIds.reduce((s, id) => s + getVal(id, 'Kitchen Labour', 'current_budget'), 0) + est.ptdLabBudget;
-        const ytdLab = locIds.reduce((s, id) => s + getVal(id, 'Kitchen Labour', 'ytd_actual'), 0) + est.ytdLab;
-        const ytdLabBudget = locIds.reduce((s, id) => s + getVal(id, 'Kitchen Labour', 'ytd_budget'), 0) + est.ytdLabBudget;
+        // Every location in the group that has any P&L this week OR any chef
+        // summary in the year to date.
+        const groupLocIds = [...new Set([
+          ...(plData || []).filter(pl => codes.includes(pl.locations.code)).map(pl => pl.location_id),
+          ...toDateRows.filter(cs => codes.includes(cs.locations.code)).map(cs => cs.location_id),
+        ])];
+        if (groupLocIds.length === 0) return null;
+
+        let ptdSales = 0, ptdBudget = 0, ptdFC = 0, ptdFCBudget = 0, ptdLab = 0, ptdLabBudget = 0;
+        let ytdSales = 0, ytdBudget = 0, ytdFC = 0, ytdFCBudget = 0, ytdLab = 0, ytdLabBudget = 0;
+        for (const id of groupLocIds) {
+          const hasRealPl = realPlLocSet.has(id);
+          const hasAnyPl = (plData || []).some(pl => pl.location_id === id);
+          const periodRows = toDateRows.filter(cs => cs.location_id === id && cs.period_number === period);
+          const ytdRows = toDateRows.filter(cs => cs.location_id === id);
+          const curRow = (currentWeekData || []).find(cs => cs.location_id === id);
+
+          // PTD/YTD actuals: reconciled P&L when a finalized upload exists,
+          // otherwise summed from the chef summaries' weekly actuals.
+          if (hasRealPl) {
+            ptdSales += getVal(id, 'Food Sales', 'current_actual');
+            ptdFC += getVal(id, 'Cost of Sales (Food)', 'current_actual');
+            ptdLab += getVal(id, 'Kitchen Labour', 'current_actual');
+            ytdSales += getVal(id, 'Food Sales', 'ytd_actual');
+            ytdFC += getVal(id, 'Cost of Sales (Food)', 'ytd_actual');
+            ytdLab += getVal(id, 'Kitchen Labour', 'ytd_actual');
+          } else {
+            ptdSales += sumBy(periodRows, weeklySales);
+            ptdFC += sumBy(periodRows, cs => Number(cs.usage_amount || 0));
+            ptdLab += sumBy(periodRows, cs => Number(cs.labour_spent || 0));
+            ytdSales += sumBy(ytdRows, weeklySales);
+            ytdFC += sumBy(ytdRows, cs => Number(cs.usage_amount || 0));
+            ytdLab += sumBy(ytdRows, cs => Number(cs.labour_spent || 0));
+          }
+
+          // Budgets: from the P&L when present (incl. budget-only uploads),
+          // else the chef summary's stored budget figures.
+          if (hasAnyPl) {
+            ptdBudget += getVal(id, 'Food Sales', 'current_budget');
+            ptdFCBudget += getVal(id, 'Cost of Sales (Food)', 'current_budget');
+            ptdLabBudget += getVal(id, 'Kitchen Labour', 'current_budget');
+            ytdBudget += getVal(id, 'Food Sales', 'ytd_budget');
+            ytdFCBudget += getVal(id, 'Cost of Sales (Food)', 'ytd_budget');
+            ytdLabBudget += getVal(id, 'Kitchen Labour', 'ytd_budget');
+          } else if (curRow) {
+            const pb = Number(curRow.budget_food_sales_period || 0);
+            ptdBudget += pb;
+            ptdFCBudget += (Number(curRow.budget_food_cost_pct || 0) / 100) * pb;
+            ptdLabBudget += (Number(curRow.labour_budget_pct || 0) / 100) * pb;
+            const yb = Number(curRow.recap_sales_ytd_budget || 0);
+            ytdBudget += yb;
+            ytdFCBudget += (Number(curRow.recap_fc_ytd_budget_pct || 0) / 100) * yb;
+            ytdLabBudget += (Number(curRow.recap_labour_ytd_budget_pct || 0) / 100) * yb;
+          }
+        }
         const ptdFCPct = ptdSales > 0 ? (ptdFC / ptdSales) * 100 : 0;
         const ptdFCBudgetPct = ptdBudget > 0 ? (ptdFCBudget / ptdBudget) * 100 : 0;
         const ytdFCPct = ytdSales > 0 ? (ytdFC / ytdSales) * 100 : 0;
@@ -1475,6 +1518,27 @@ function ConsolidatedSummaries({ fiscalYear, period, week }: { fiscalYear: numbe
       .eq('week_number', week)
       .eq('locations.exclude_from_reporting', false);
 
+    // Only a FINALIZED (non-budget-only) P&L for the week reconciles PTD/YTD;
+    // otherwise the numbers are calculated from the chef summaries.
+    const { data: weekUploads } = weekEndingDate ? await supabase
+      .from('weekly_summary_pl_uploads')
+      .select('location_id, is_budget_only')
+      .eq('week_ending_date', weekEndingDate)
+      : { data: null };
+    const realPlLocSet = new Set((weekUploads || []).filter(u => !u.is_budget_only).map(u => u.location_id));
+
+    // Fiscal-year-to-date chef summaries (up to this period/week): PTD sums the
+    // current period's weekly actuals, YTD sums the whole year to date.
+    const { data: fyChefRowsRaw } = await supabase
+      .from('weekly_summary_chef_summary')
+      .select('location_id, period_number, week_number, food_sales_labour_push, food_sales_silverware, usage_amount, labour_spent, locations!inner(code, exclude_from_reporting)')
+      .eq('fiscal_year', fiscalYear)
+      .eq('locations.exclude_from_reporting', false);
+    const toDateRows = (fyChefRowsRaw || []).filter((cs: any) =>
+      cs.period_number < period || (cs.period_number === period && cs.week_number <= week));
+    const weeklySales = (cs: any) => Number(cs.food_sales_labour_push || cs.food_sales_silverware || 0);
+    const sumBy = (rows: any[], f: (cs: any) => number) => rows.reduce((s, cs) => s + f(cs), 0);
+
     // Chef summaries alone are enough to render estimated figures; only bail
     // when neither the week's P&L nor any summary exists.
     if ((!plData || plData.length === 0) && (!chefSummaryData || chefSummaryData.length === 0)) {
@@ -1488,45 +1552,64 @@ function ConsolidatedSummaries({ fiscalYear, period, week }: { fiscalYear: numbe
     };
 
     const calculateMetrics = (locationCodes: string[]) => {
-      const filteredPL = (plData || []).filter(pl => locationCodes.includes(pl.locations.code));
-      const locationIds = [...new Set(filteredPL.map(pl => pl.location_id))];
+      // Every location in the group with a P&L this week OR a summary YTD.
+      const groupLocIds = [...new Set([
+        ...(plData || []).filter(pl => locationCodes.includes(pl.locations.code)).map(pl => pl.location_id),
+        ...toDateRows.filter(cs => locationCodes.includes(cs.locations.code)).map(cs => cs.location_id),
+      ])];
 
-      // Locations whose P&L for the week isn't uploaded yet contribute their
-      // chef-summary estimates (PTD snapshot fields + recap YTD) so brand
-      // totals aren't missing stores on Monday.
-      const estRows = (chefSummaryData || []).filter(cs =>
-        locationCodes.includes(cs.locations.code) && !locationIds.includes(cs.location_id));
-      const est = estRows.reduce((acc, cs) => {
-        const eptdSales = Number(cs.sales_ptd_actual || 0);
-        const eptdBudget = Number(cs.budget_food_sales_period || 0);
-        const eytdSales = Number(cs.recap_sales_ytd_actual || 0);
-        const eytdBudget = Number(cs.recap_sales_ytd_budget || 0);
-        acc.ptdSales += eptdSales;
-        acc.ptdBudget += eptdBudget;
-        acc.ptdFC += (Number(cs.food_cost_ptd_pct || 0) / 100) * eptdSales;
-        acc.ptdFCBudget += (Number(cs.budget_food_cost_pct || 0) / 100) * eptdBudget;
-        acc.ptdLab += (Number(cs.labour_cost_ptd_pct || 0) / 100) * eptdSales;
-        acc.ptdLabBudget += (Number(cs.labour_budget_pct || 0) / 100) * eptdBudget;
-        acc.ytdSales += eytdSales;
-        acc.ytdBudget += eytdBudget;
-        acc.ytdFC += (Number(cs.recap_fc_ytd_pct || 0) / 100) * eytdSales;
-        acc.ytdFCBudget += (Number(cs.recap_fc_ytd_budget_pct || 0) / 100) * eytdBudget;
-        acc.ytdLab += (Number(cs.recap_labour_ytd_pct || 0) / 100) * eytdSales;
-        acc.ytdLabBudget += (Number(cs.recap_labour_ytd_budget_pct || 0) / 100) * eytdBudget;
-        return acc;
-      }, { ptdSales: 0, ptdBudget: 0, ptdFC: 0, ptdFCBudget: 0, ptdLab: 0, ptdLabBudget: 0, ytdSales: 0, ytdBudget: 0, ytdFC: 0, ytdFCBudget: 0, ytdLab: 0, ytdLabBudget: 0 });
+      let ptdSales = 0, ptdBudget = 0, ptdFoodCost = 0, ptdFoodCostBudget = 0, ptdLabour = 0, ptdLabourBudget = 0;
+      let ytdSales = 0, ytdBudget = 0, ytdFoodCost = 0, ytdFoodCostBudget = 0, ytdLabour = 0, ytdLabourBudget = 0;
+      for (const id of groupLocIds) {
+        const hasRealPl = realPlLocSet.has(id);
+        const hasAnyPl = (plData || []).some(pl => pl.location_id === id);
+        const periodRows = toDateRows.filter(cs => cs.location_id === id && cs.period_number === period);
+        const ytdRows = toDateRows.filter(cs => cs.location_id === id);
+        const curRow = (chefSummaryData || []).find(cs => cs.location_id === id);
 
-      // PTD (Period-to-Date) metrics - from current_actual and current_budget
-      const ptdSales = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Food Sales', 'current_actual'), 0) + est.ptdSales;
-      const ptdBudget = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Food Sales', 'current_budget'), 0) + est.ptdBudget;
+        // PTD/YTD actuals: reconciled P&L when a finalized upload exists,
+        // otherwise summed from the chef summaries' weekly actuals.
+        if (hasRealPl) {
+          ptdSales += getLineItemValue(id, 'Food Sales', 'current_actual');
+          ptdFoodCost += getLineItemValue(id, 'Cost of Sales (Food)', 'current_actual');
+          ptdLabour += getLineItemValue(id, 'Kitchen Labour', 'current_actual');
+          ytdSales += getLineItemValue(id, 'Food Sales', 'ytd_actual');
+          ytdFoodCost += getLineItemValue(id, 'Cost of Sales (Food)', 'ytd_actual');
+          ytdLabour += getLineItemValue(id, 'Kitchen Labour', 'ytd_actual');
+        } else {
+          ptdSales += sumBy(periodRows, weeklySales);
+          ptdFoodCost += sumBy(periodRows, cs => Number(cs.usage_amount || 0));
+          ptdLabour += sumBy(periodRows, cs => Number(cs.labour_spent || 0));
+          ytdSales += sumBy(ytdRows, weeklySales);
+          ytdFoodCost += sumBy(ytdRows, cs => Number(cs.usage_amount || 0));
+          ytdLabour += sumBy(ytdRows, cs => Number(cs.labour_spent || 0));
+        }
+
+        // Budgets: from the P&L when present (incl. budget-only uploads),
+        // else the chef summary's stored budget figures.
+        if (hasAnyPl) {
+          ptdBudget += getLineItemValue(id, 'Food Sales', 'current_budget');
+          ptdFoodCostBudget += getLineItemValue(id, 'Cost of Sales (Food)', 'current_budget');
+          ptdLabourBudget += getLineItemValue(id, 'Kitchen Labour', 'current_budget');
+          ytdBudget += getLineItemValue(id, 'Food Sales', 'ytd_budget');
+          ytdFoodCostBudget += getLineItemValue(id, 'Cost of Sales (Food)', 'ytd_budget');
+          ytdLabourBudget += getLineItemValue(id, 'Kitchen Labour', 'ytd_budget');
+        } else if (curRow) {
+          const pb = Number(curRow.budget_food_sales_period || 0);
+          ptdBudget += pb;
+          ptdFoodCostBudget += (Number(curRow.budget_food_cost_pct || 0) / 100) * pb;
+          ptdLabourBudget += (Number(curRow.labour_budget_pct || 0) / 100) * pb;
+          const yb = Number(curRow.recap_sales_ytd_budget || 0);
+          ytdBudget += yb;
+          ytdFoodCostBudget += (Number(curRow.recap_fc_ytd_budget_pct || 0) / 100) * yb;
+          ytdLabourBudget += (Number(curRow.recap_labour_ytd_budget_pct || 0) / 100) * yb;
+        }
+      }
+
       // Pro-rate the full-period sales budget to the weeks elapsed so the variance
       // doesn't include budget for weeks we haven't reached yet (periods = 4 weeks).
       const weeksElapsed = Math.min(week, 4);
       const ptdSalesVariance = ptdSales - ptdBudget * weeksElapsed / 4;
-
-      // YTD (Year-to-Date) metrics - from ytd_actual and ytd_budget
-      const ytdSales = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Food Sales', 'ytd_actual'), 0) + est.ytdSales;
-      const ytdBudget = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Food Sales', 'ytd_budget'), 0) + est.ytdBudget;
       const ytdSalesVariance = ytdSales - (ytdBudget - ptdBudget * (4 - weeksElapsed) / 4);
 
       // WTD (Week-to-Date) metrics - totalled from the chef summaries for the week
@@ -1537,15 +1620,11 @@ function ConsolidatedSummaries({ fiscalYear, period, week }: { fiscalYear: numbe
       const wtdLabourAmount = filteredChefSummary.reduce((sum, s) => sum + Number(s.labour_spent || 0), 0);
       const wtdSalesVariance = wtdSales - (ptdBudget > 0 ? ptdBudget / 4 : 0);
 
-      const ptdFoodCost = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Cost of Sales (Food)', 'current_actual'), 0) + est.ptdFC;
       const ptdFoodCostPct = ptdSales > 0 ? (ptdFoodCost / ptdSales) * 100 : 0;
-      const ptdFoodCostBudget = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Cost of Sales (Food)', 'current_budget'), 0) + est.ptdFCBudget;
       const ptdFoodCostBudgetPct = ptdBudget > 0 ? (ptdFoodCostBudget / ptdBudget) * 100 : 0;
       const ptdFoodCostVariance = ptdFoodCostPct - ptdFoodCostBudgetPct;
 
-      const ytdFoodCost = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Cost of Sales (Food)', 'ytd_actual'), 0) + est.ytdFC;
       const ytdFoodCostPct = ytdSales > 0 ? (ytdFoodCost / ytdSales) * 100 : 0;
-      const ytdFoodCostBudget = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Cost of Sales (Food)', 'ytd_budget'), 0) + est.ytdFCBudget;
       const ytdFoodCostBudgetPct = ytdBudget > 0 ? (ytdFoodCostBudget / ytdBudget) * 100 : 0;
       const ytdFoodCostVariance = ytdFoodCostPct - ytdFoodCostBudgetPct;
 
@@ -1553,17 +1632,11 @@ function ConsolidatedSummaries({ fiscalYear, period, week }: { fiscalYear: numbe
       const wtdFoodCostPct = wtdSales > 0 ? (wtdFoodCostAmount / wtdSales) * 100 : 0;
       const wtdFoodCostVariance = wtdFoodCostPct - ptdFoodCostBudgetPct;
 
-      // PTD Labour from P&L
-      const ptdLabour = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Kitchen Labour', 'current_actual'), 0) + est.ptdLab;
       const ptdLabourPct = ptdSales > 0 ? (ptdLabour / ptdSales) * 100 : 0;
-      const ptdLabourBudget = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Kitchen Labour', 'current_budget'), 0) + est.ptdLabBudget;
       const ptdLabourBudgetPct = ptdBudget > 0 ? (ptdLabourBudget / ptdBudget) * 100 : 0;
       const ptdLabourVariance = ptdLabourPct - ptdLabourBudgetPct;
 
-      // YTD Labour from P&L
-      const ytdLabour = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Kitchen Labour', 'ytd_actual'), 0) + est.ytdLab;
       const ytdLabourPct = ytdSales > 0 ? (ytdLabour / ytdSales) * 100 : 0;
-      const ytdLabourBudget = locationIds.reduce((sum, locId) => sum + getLineItemValue(locId, 'Kitchen Labour', 'ytd_budget'), 0) + est.ytdLabBudget;
       const ytdLabourBudgetPct = ytdBudget > 0 ? (ytdLabourBudget / ytdBudget) * 100 : 0;
       const ytdLabourVariance = ytdLabourPct - ytdLabourBudgetPct;
 
