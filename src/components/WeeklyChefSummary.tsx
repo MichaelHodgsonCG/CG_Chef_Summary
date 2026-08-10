@@ -257,6 +257,8 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
   // persisted yet, so chefs get a visible reminder and a leave warning
   // instead of silently losing a finished summary.
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Set when there is no completed (ended) week to report — blocks starting a new one.
+  const [entryBlocked, setEntryBlocked] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -285,10 +287,7 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
       if (summaryId) {
         loadSummary(summaryId);
       } else {
-        const autofill = await buildAutofillData();
-        if (Object.keys(autofill).length > 0) {
-          setFormData(prev => ({ ...prev, ...autofill }));
-        }
+        await enterReportableWeek();
       }
     };
     init();
@@ -383,9 +382,110 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
     };
   };
 
-  const buildAutofillData = async (): Promise<Partial<WeeklySummaryData>> => {
+  const localTodayISO = (): string => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // The week the chef may report: the latest fiscal week that has ENDED,
+  // advancing sequentially from their last saved summary but never into a week
+  // that hasn't ended yet. Returns caughtUp when they're already up to date.
+  const determineTargetWeek = async (): Promise<
+    | { blocked: string }
+    | { fiscal_year: number; period: number; week: number; caughtUp?: boolean }
+  > => {
+    const today = localTodayISO();
+    const { data: ended } = await supabase
+      .from('fiscal_calendar')
+      .select('fiscal_year, period, week, end_date')
+      .lt('end_date', today)
+      .order('fiscal_year', { ascending: false })
+      .order('period', { ascending: false })
+      .order('week', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!ended) return { blocked: 'No completed fiscal week to report yet — check back once this week ends.' };
+
+    const { data: prev } = await supabase
+      .from('weekly_summary_chef_summary')
+      .select('fiscal_year, period_number, week_number')
+      .eq('location_id', locationId)
+      .order('fiscal_year', { ascending: false })
+      .order('period_number', { ascending: false })
+      .order('week_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!prev) return { fiscal_year: ended.fiscal_year, period: ended.period, week: ended.week };
+
+    // The calendar week immediately after their last saved summary.
+    const { data: nextCal } = await supabase
+      .from('fiscal_calendar')
+      .select('fiscal_year, period, week, end_date')
+      .eq('fiscal_year', prev.fiscal_year)
+      .or(`period.gt.${prev.period_number},and(period.eq.${prev.period_number},week.gt.${prev.week_number})`)
+      .order('period', { ascending: true })
+      .order('week', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    let candidate: { fiscal_year: number; period: number; week: number; end_date: string } | null = nextCal;
+    if (!candidate) {
+      const { data: nextYearCal } = await supabase
+        .from('fiscal_calendar')
+        .select('fiscal_year, period, week, end_date')
+        .eq('fiscal_year', prev.fiscal_year + 1)
+        .order('period', { ascending: true })
+        .order('week', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      candidate = nextYearCal;
+    }
+    // Only advance to the next week once IT has ended; otherwise the chef is
+    // caught up — resume their last reported week rather than opening a new one.
+    if (candidate && candidate.end_date < today) {
+      return { fiscal_year: candidate.fiscal_year, period: candidate.period, week: candidate.week };
+    }
+    return { fiscal_year: prev.fiscal_year, period: prev.period_number, week: prev.week_number, caughtUp: true };
+  };
+
+  // Resolve the reportable week and either RESUME its existing summary or open a
+  // fresh (autofilled) form for it — never a duplicate or a not-yet-ended week.
+  const enterReportableWeek = async () => {
+    const target = await determineTargetWeek();
+    if ('blocked' in target) {
+      setEntryBlocked(target.blocked);
+      return;
+    }
+    setEntryBlocked(null);
+    const { data: existing } = await supabase
+      .from('weekly_summary_chef_summary')
+      .select('id')
+      .eq('location_id', locationId)
+      .eq('fiscal_year', target.fiscal_year)
+      .eq('period_number', target.period)
+      .eq('week_number', target.week)
+      .maybeSingle();
+    if (existing) {
+      await loadSummary(existing.id);
+      if (target.caughtUp) {
+        setMessage({ type: 'success', text: `You're up to date — showing P${target.period} W${target.week}. The next week opens once it ends.` });
+      }
+      return;
+    }
+    const autofill = await buildAutofillForWeek(target.fiscal_year, target.period, target.week);
+    setFormData({ ...blankFormData(), ...autofill });
+    setActiveSummaryId(null);
+    setHasUnsavedChanges(false);
+    setMessage(null);
+  };
+
+  const buildAutofillForWeek = async (
+    targetFiscalYear: number,
+    targetPeriod: number,
+    targetWeek: number
+  ): Promise<Partial<WeeklySummaryData>> => {
     try {
-      const { data: prev, error } = await supabase
+      const { data: prev } = await supabase
         .from('weekly_summary_chef_summary')
         .select('*')
         .eq('location_id', locationId)
@@ -395,74 +495,12 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
         .limit(1)
         .maybeSingle();
 
-      let nextFiscalYear: number;
-      let nextPeriod: number;
-      let nextWeek: number;
-
-      if (error || !prev) {
-        const { data: currentCal } = await supabase
-          .from('fiscal_calendar')
-          .select('fiscal_year, period, week')
-          .eq('is_current', true)
-          .maybeSingle();
-
-        if (!currentCal) return {};
-
-        nextFiscalYear = currentCal.fiscal_year;
-        nextPeriod = currentCal.period;
-        nextWeek = currentCal.week;
-      } else {
-        const prevWeek: number = prev.week_number;
-        const prevPeriod: number = prev.period_number;
-
-        // Advance using the fiscal calendar: the week after the last saved
-        // summary. A hardcoded "4 weeks per period" assumption mislabels the
-        // new week in 5-week periods and turns P13 into a nonexistent P14.
-        const { data: nextCal } = await supabase
-          .from('fiscal_calendar')
-          .select('fiscal_year, period, week')
-          .eq('fiscal_year', prev.fiscal_year)
-          .or(`period.gt.${prevPeriod},and(period.eq.${prevPeriod},week.gt.${prevWeek})`)
-          .order('period', { ascending: true })
-          .order('week', { ascending: true })
-          .limit(1)
-          .maybeSingle();
-
-        if (nextCal) {
-          nextFiscalYear = nextCal.fiscal_year;
-          nextPeriod = nextCal.period;
-          nextWeek = nextCal.week;
-        } else {
-          // The last summary was the final week of its fiscal year — roll
-          // into the first calendar week of the next year.
-          const { data: nextYearCal } = await supabase
-            .from('fiscal_calendar')
-            .select('fiscal_year, period, week')
-            .eq('fiscal_year', prev.fiscal_year + 1)
-            .order('period', { ascending: true })
-            .order('week', { ascending: true })
-            .limit(1)
-            .maybeSingle();
-
-          if (nextYearCal) {
-            nextFiscalYear = nextYearCal.fiscal_year;
-            nextPeriod = nextYearCal.period;
-            nextWeek = nextYearCal.week;
-          } else {
-            // No calendar rows to consult — fall back to simple arithmetic.
-            nextWeek = prevWeek >= 4 ? 1 : prevWeek + 1;
-            nextPeriod = prevWeek >= 4 ? prevPeriod + 1 : prevPeriod;
-            nextFiscalYear = prev.fiscal_year;
-          }
-        }
-      }
-
-      const plData = await fetchPLDataForPeriod(locationId, nextFiscalYear, nextPeriod, nextWeek);
+      const plData = await fetchPLDataForPeriod(locationId, targetFiscalYear, targetPeriod, targetWeek);
 
       const result: Partial<WeeklySummaryData> = {
-        fiscal_year: nextFiscalYear,
-        period_number: nextPeriod,
-        week_number: nextWeek,
+        fiscal_year: targetFiscalYear,
+        period_number: targetPeriod,
+        week_number: targetWeek,
       };
 
       if (plData) {
@@ -607,11 +645,9 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
 
   const handleSelectSummary = async (value: string) => {
     if (value === 'new') {
-      const autofill = await buildAutofillData();
-      setFormData({ ...blankFormData(), ...autofill });
-      setActiveSummaryId(null);
-      setMessage(null);
-      setHasUnsavedChanges(false);
+      // "+ New Summary" opens the reportable week (resuming it if it already
+      // exists), never a duplicate or a week that hasn't ended.
+      await enterReportableWeek();
     } else {
       loadSummary(value);
     }
@@ -943,6 +979,51 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-cg-accent"></div>
           <p className="mt-4 text-slate-600">Loading summary...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (entryBlocked && !activeSummaryId) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6">
+        <div className="max-w-3xl mx-auto">
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6 mb-6 flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 mb-2">{locationName}</h1>
+              <h2 className="text-xl text-slate-600">Weekly Chef Summary</h2>
+            </div>
+            <button
+              onClick={logout}
+              className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-5 h-5" />
+              <span className="hidden sm:inline">Sign Out</span>
+            </button>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-8 text-center">
+            <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
+            <p className="text-slate-800 font-medium">{entryBlocked}</p>
+            <p className="text-slate-500 text-sm mt-1">You can review a past week below.</p>
+          </div>
+          {savedSummaries.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mt-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Review a past summary</label>
+              <select
+                defaultValue=""
+                onChange={(e) => e.target.value && loadSummary(e.target.value)}
+                className="w-full pl-3 pr-10 py-2 border border-slate-300 rounded-lg bg-white text-slate-800 text-sm cursor-pointer"
+              >
+                <option value="">Select a week…</option>
+                {savedSummaries.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    FY{s.fiscal_year} — Period {s.period_number}, Week {s.week_number}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
     );
