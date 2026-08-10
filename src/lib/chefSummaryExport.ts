@@ -765,28 +765,25 @@ export function exportChefSummaryToPdf(
     doc.text('Full detail in Food Cost Action Plan / Labour Action Plan.', margin, y);
     doc.setTextColor(0, 0, 0);
   } else {
-    // Fallback for reports created before structured actions were captured.
-    const priorities = [
-      ...splitIntoBullets(data.sales_action_plan || data.action_plan_summary, 1),
-      ...splitIntoBullets(data.labour_summary, 1),
-      ...splitIntoBullets(data.food_cost_summary, 1),
-    ].slice(0, 3);
+    // No structured actions were saved when this PDF was built. Say so plainly
+    // rather than deriving bullets from the sales/labour/food narratives — that
+    // dressed a narrative sentence up as a "committed action" and made it look
+    // like the chef's real actions had been replaced (they were just unsaved).
     const boxTop = y;
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'normal');
-    const priorityLines = priorities.length > 0
-      ? priorities.map((p) => `• ${p}`)
-      : [
-          '• ____________________________________________________',
-          '• ____________________________________________________',
-          '• ____________________________________________________',
-        ];
-    const wrappedPriorityLines = priorityLines.flatMap((l) => doc.splitTextToSize(l, contentWidth - 16));
-    const boxHeight = wrappedPriorityLines.length * 13 + 16;
-    doc.setDrawColor(30, 41, 59);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(120);
+    const msg = doc.splitTextToSize(
+      'No committed actions were recorded for this week. If you entered actions, save them and regenerate this PDF.',
+      contentWidth - 16
+    );
+    const boxHeight = msg.length * 13 + 16;
+    doc.setDrawColor(203, 213, 225);
     doc.setLineWidth(1);
     doc.rect(margin, boxTop, contentWidth, boxHeight);
-    doc.text(wrappedPriorityLines, margin + 8, boxTop + 14);
+    doc.text(msg, margin + 8, boxTop + 14);
+    doc.setTextColor(0, 0, 0);
+    y = boxTop + boxHeight;
   }
 
   doc.setFontSize(8);
