@@ -256,19 +256,17 @@ const COLOR_RED: [number, number, number] = [220, 38, 38];
 const COLOR_SLATE_HEADER: [number, number, number] = [30, 41, 59];
 
 /**
- * Tolerance bands for variance color-coding. Restaurant P&L noise (portioning,
- * timing of invoices, etc.) routinely produces +/-0.5pt swings on FC%/Labour% and
- * the rough equivalent on sales variance without representing a real operational
- * problem, so that's the green/amber boundary. Beyond ~2pt the variance is large
- * enough that it reflects a real trend (not noise) and needs flagging red.
+ * Variance color-coding. Green means AT OR BETTER than budget — being worse than
+ * budget is never green, even by a small amount (a food cost 0.45pt over budget
+ * should not read as "good"). Worse-than-budget is amber up to ~2pt (restaurant
+ * P&L noise) and red beyond, where it reflects a real trend.
  */
-const AMBER_THRESHOLD = 0.5;
 const RED_THRESHOLD = 2;
 
 /** Returns an RGB triple for a variance value. `goodIsHigh` = true means higher (more positive) is better. */
 function varianceColor(value: number, goodIsHigh: boolean): [number, number, number] {
-  const signedBad = goodIsHigh ? -value : value;
-  if (signedBad <= AMBER_THRESHOLD) return COLOR_GREEN;
+  const signedBad = goodIsHigh ? -value : value; // positive = worse than budget
+  if (signedBad <= 0) return COLOR_GREEN;
   if (signedBad <= RED_THRESHOLD) return COLOR_AMBER;
   return COLOR_RED;
 }
@@ -861,22 +859,32 @@ export function exportChefSummaryToPdf(
       fmtMoney(totals.ptd),
     ];
 
-    autoTable(doc, {
-      startY: 68,
-      head: [['Item', 'Cost', 'Var/Day', 'Reason', 'Action', 'Manager', 'Team Members', 'WK1', 'WK2', 'WK3', 'WK4', 'Total', 'PTD Diff']],
-      body: fcapRows,
-      foot: [footRow],
-      styles: { fontSize: 8, cellPadding: 5, valign: 'middle' },
-      headStyles: { fillColor: COLOR_SLATE_HEADER, textColor: 255, fontStyle: 'bold' },
-      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      columnStyles: {
-        0: { fontStyle: 'bold', cellWidth: 90 },
-        3: { cellWidth: 100 },
-        4: { cellWidth: 110 },
-      },
-      margin: { left: 30, right: 30 },
-    });
+    // The document default is portrait, so autoTable's overflow/continuation
+    // pages would come out portrait. Force any page added while this table draws
+    // to stay landscape (a long FCAP — e.g. Wildcraft's — wraps onto page 2).
+    const origAddPage = doc.addPage.bind(doc);
+    (doc as unknown as { addPage: (...a: unknown[]) => jsPDF }).addPage = () =>
+      origAddPage('letter', 'landscape');
+    try {
+      autoTable(doc, {
+        startY: 68,
+        head: [['Item', 'Cost', 'Var/Day', 'Reason', 'Action', 'Manager', 'Team Members', 'WK1', 'WK2', 'WK3', 'WK4', 'Total', 'PTD Diff']],
+        body: fcapRows,
+        foot: [footRow],
+        styles: { fontSize: 8, cellPadding: 5, valign: 'middle' },
+        headStyles: { fillColor: COLOR_SLATE_HEADER, textColor: 255, fontStyle: 'bold' },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 90 },
+          3: { cellWidth: 100 },
+          4: { cellWidth: 110 },
+        },
+        margin: { left: 30, right: 30 },
+      });
+    } finally {
+      (doc as unknown as { addPage: typeof origAddPage }).addPage = origAddPage;
+    }
 
     const fcapFinalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
     doc.setFontSize(8);
