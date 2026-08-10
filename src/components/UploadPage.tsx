@@ -56,6 +56,10 @@ export default function UploadPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{ total: number; completed: number; current: string }>({ total: 0, completed: 0, current: '' });
   const [trueUps, setTrueUps] = useState<LocationTrueUp[]>([]);
+  // Budget-only (provisional) mode: load the period's budget targets before the
+  // period closes, WITHOUT the (partial) actuals that would skew PTD. Applies to
+  // the whole batch. Replaced automatically when the finalized P&L is uploaded.
+  const [budgetOnly, setBudgetOnly] = useState(false);
 
   useEffect(() => {
     loadLocations();
@@ -358,7 +362,8 @@ export default function UploadPage() {
                 location_id: locationId,
                 week_ending_date: week.weekEndingDate,
                 filename: file.name,
-                status: 'completed'
+                status: 'completed',
+                is_budget_only: budgetOnly
               })
               .select()
               .single();
@@ -400,7 +405,7 @@ export default function UploadPage() {
             const lineItemsToInsert = week.lineItems.map(item => {
               const qtd = qtdMap?.get(item.line_item_name);
               const ytd = ytdMap?.get(item.line_item_name);
-              return {
+              const merged: Record<string, any> = {
                 upload_id: upload.id,
                 location_id: locationId,
                 week_ending_date: week.weekEndingDate,
@@ -408,6 +413,16 @@ export default function UploadPage() {
                 ...(qtd ?? {}),
                 ...(ytd ?? {})
               };
+              // Budget-only: keep budgets (+ YTD, which is ~prior periods at a
+              // period's start) but zero the period-to-date actuals so nothing
+              // downstream mistakes a partial figure for the reconciled truth.
+              if (budgetOnly) {
+                merged.current_actual = 0;
+                merged.current_actual_pct = 0;
+                merged.qtd_actual = 0;
+                merged.qtd_actual_pct = 0;
+              }
+              return merged;
             });
 
             const { error: itemsError } = await supabase
@@ -454,8 +469,9 @@ export default function UploadPage() {
       }
 
       // True up each uploaded week's chef estimate against the reconciled Sage
-      // numbers, for the per-location variance panel. Best-effort.
-      if (affectedWeeks.size > 0) {
+      // numbers, for the per-location variance panel. Best-effort. Skipped for
+      // budget-only uploads — there are no reconciled actuals to true up against.
+      if (affectedWeeks.size > 0 && !budgetOnly) {
         setUploadProgress({ total: parsedFiles.length, completed: parsedFiles.length, current: 'Building variance report...' });
         const variances: LocationTrueUp[] = [];
         for (const w of affectedWeeks.values()) {
@@ -530,6 +546,23 @@ export default function UploadPage() {
                 Used only for files that don't carry their own week ending date.
               </p>
             </div>
+
+            <label className="flex items-start gap-3 rounded-lg border border-cg-border p-3 cursor-pointer hover:bg-cg-surface2 transition-colors">
+              <input
+                type="checkbox"
+                checked={budgetOnly}
+                onChange={(e) => setBudgetOnly(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-cg-accent"
+              />
+              <span className="text-sm">
+                <span className="font-medium text-cg-text">Budget only — period not closed yet</span>
+                <span className="block text-xs text-slate-500 mt-0.5">
+                  Loads the new period's budget targets so chefs report against the right numbers, and
+                  <strong> skips the actuals</strong> (they'd be partial and skew PTD). Re-upload the finalized
+                  P&L when the period closes to fill in actuals — it replaces this one.
+                </span>
+              </span>
+            </label>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -618,6 +651,7 @@ export default function UploadPage() {
             fileCount={parsedFiles.length}
             flaggedCount={flaggedCount}
             weekEndingDate={weekEndingDate}
+            budgetOnly={budgetOnly}
             onApprove={handleUpload}
             onCancel={clearSelection}
           />
@@ -634,6 +668,7 @@ function IngestReviewCard({
   fileCount,
   flaggedCount,
   weekEndingDate,
+  budgetOnly,
   onApprove,
   onCancel,
 }: {
@@ -641,6 +676,7 @@ function IngestReviewCard({
   fileCount: number;
   flaggedCount: number;
   weekEndingDate: string;
+  budgetOnly: boolean;
   onApprove: () => void;
   onCancel: () => void;
 }) {
@@ -652,8 +688,16 @@ function IngestReviewCard({
     <div className="bg-cg-surface rounded-xl shadow-cg border border-cg-border overflow-hidden">
       <div className="bg-cg-surface2 px-6 py-4 border-b border-cg-border flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-cg-text">Review before ingesting</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-cg-text">Review before ingesting</h2>
+            {budgetOnly && (
+              <span className="text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-cg-accentSoft text-cg-accent border border-cg-accent/30">
+                Budget only
+              </span>
+            )}
+          </div>
           <p className="text-xs text-cg-muted mt-1">
+            {budgetOnly && <span className="text-cg-accent font-medium">Budgets load; actuals are skipped. </span>}
             {rows.length} row{rows.length !== 1 ? 's' : ''} from {fileCount} file{fileCount !== 1 ? 's' : ''} ·{' '}
             {flaggedCount > 0 ? (
               <span className="text-amber-600 font-medium">{flaggedCount} flagged — double-check below</span>
@@ -726,7 +770,7 @@ function IngestReviewCard({
           disabled={!weekEndingDate}
           className="bg-cg-accent text-white px-6 py-2 rounded-lg font-medium hover:bg-cg-accentHover disabled:bg-cg-surface3 disabled:text-cg-faint disabled:cursor-not-allowed transition-colors"
         >
-          Approve &amp; Ingest {fileCount} File{fileCount !== 1 ? 's' : ''}
+          Approve &amp; Ingest {budgetOnly ? 'Budget for ' : ''}{fileCount} File{fileCount !== 1 ? 's' : ''}
         </button>
       </div>
     </div>
