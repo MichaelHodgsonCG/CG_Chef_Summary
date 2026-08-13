@@ -56,6 +56,14 @@ PERSIST THIS: if this repo has a CLAUDE.md, record this protocol there now
 (verbatim, including the bus ref) so every future session inherits it
 without a paste. Confirm in this session's log entry that it is persisted.
 
+## TASK LIST STANDARD PROTOCOL (CG)
+
+Before designing or building ANY task/checklist/action/assignment feature,
+read the "CG Universal Task List Standard" from the CG bus
+(cc_project_artifacts where metadata->>'kind'='standard', newest active
+version) and conform to its §6 checklist — deviations require Michael's
+explicit sign-off, filed as a decision.
+
 ## Project conventions for this repo
 
 - Project name for bus filings: `Weekly Summary`
