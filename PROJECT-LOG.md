@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-17] Chef name restored to PDF header; chef-notes audit
+Shipped:   Shared PDF builder now looks up the location's chef of record from weekly_summary_users (one chef per restaurant, verified) and prints it in the header — all three generation paths (main screen, guided Regenerate, HQ viewer) name the same person, better than the old behaviour of printing whoever was logged in. Typecheck/lint/build clean vs baseline. Also audited every chef-entered field against what the PDF renders.
+Roadmap:   Chef PDF correctness -> in progress (audit found gaps, awaiting Michael's ruling)
+Decisions: Chef name comes from the chef-of-record lookup, not the logged-in exporter, so HQ-generated PDFs also carry it.
+Blockers:  none
+Next:      Michael to rule on the audit findings: seven chef-entered note fields never render in the PDF (food-cost commentary, features commentary, overtime notes, labour-transfer reasons, discount review, speed-of-service, usage-review comments) and several rendered ones are hard-truncated.
+
 [2026-08-17] Fix chef-downloaded PDFs missing committed actions
 Shipped:   Main-screen "Export to PDF" on the Weekly Chef Summary now routes through buildChefSummaryReport (the shared builder used by the guided package's Regenerate PDF and the HQ Executive Report). The legacy hand-assembled path passed undefined for weekAheadActions and never queried weekly_summary_actions, so chef-downloaded/emailed PDFs showed the "no committed actions" placeholder despite saved actions. ~100 lines of duplicated FCAP/food-cost assembly deleted; save-before-export guard unchanged. Verified root cause in code myself (WeeklyChefSummary.tsx:969 passed undefined); typecheck/lint deltas clean vs baseline; production build passes. Not yet verified against live data.
 Roadmap:   Chef PDF correctness -> complete (pending Michael's live check)
