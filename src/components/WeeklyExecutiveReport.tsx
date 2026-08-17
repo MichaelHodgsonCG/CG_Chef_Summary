@@ -375,7 +375,7 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
       // date — the "calculation" source when a finalized P&L isn't in yet.
       const { data: fyChefRowsRaw } = await supabase
         .from('weekly_summary_chef_summary')
-        .select('location_id, period_number, week_number, food_sales_labour_push, usage_amount, labour_spent, locations!inner(code, exclude_from_reporting)')
+        .select('location_id, period_number, week_number, food_sales_labour_push, usage_amount, labour_spent, budget_food_sales_period, recap_sales_ytd_actual, recap_sales_ytd_budget, recap_fc_ytd_pct, recap_fc_ytd_budget_pct, recap_labour_ytd_pct, recap_labour_ytd_budget_pct, locations!inner(code, exclude_from_reporting)')
         .eq('fiscal_year', fiscalYear)
         .eq('locations.exclude_from_reporting', false);
       const toDateRows = (fyChefRowsRaw || []).filter((cs: any) =>
@@ -533,11 +533,25 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
           const hasRealPl = realPlLocSet.has(id);
           const hasAnyPl = (plData || []).some(pl => pl.location_id === id);
           const periodRows = toDateRows.filter(cs => cs.location_id === id && cs.period_number === period);
-          const ytdRows = toDateRows.filter(cs => cs.location_id === id);
+          const ytdRows = toDateRows
+            .filter(cs => cs.location_id === id)
+            .sort((a, b) => (a.period_number - b.period_number) || (a.week_number - b.week_number));
           const curRow = (currentWeekData || []).find(cs => cs.location_id === id);
 
+          // The location's most recent chef row carrying a recap YTD estimate
+          // (latest reconciled P&L baseline plus that week's numbers — usually
+          // the current week). Anchoring YTD to it, plus any chef weeks filed
+          // after it, matches the per-restaurant lines so group totals tie
+          // with them and don't lose weeks a chef never filed.
+          const anchor = [...ytdRows].reverse().find(cs => Number(cs.recap_sales_ytd_actual) > 0);
+          const afterAnchor = anchor
+            ? ytdRows.filter(cs =>
+                cs.period_number > anchor.period_number ||
+                (cs.period_number === anchor.period_number && cs.week_number > anchor.week_number))
+            : [];
+
           // PTD/YTD actuals: reconciled P&L when a finalized upload exists,
-          // otherwise summed from the chef summaries' weekly actuals.
+          // else the recap-anchored estimate, else summed chef weekly actuals.
           if (hasRealPl) {
             ptdSales += getVal(id, 'Food Sales', 'current_actual');
             ptdFC += getVal(id, 'Cost of Sales (Food)', 'current_actual');
@@ -549,13 +563,25 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
             ptdSales += sumBy(periodRows, weeklySales);
             ptdFC += sumBy(periodRows, cs => Number(cs.usage_amount || 0));
             ptdLab += sumBy(periodRows, cs => Number(cs.labour_spent || 0));
-            ytdSales += sumBy(ytdRows, weeklySales);
-            ytdFC += sumBy(ytdRows, cs => Number(cs.usage_amount || 0));
-            ytdLab += sumBy(ytdRows, cs => Number(cs.labour_spent || 0));
+            if (anchor) {
+              const anchorYtdSales = Number(anchor.recap_sales_ytd_actual);
+              ytdSales += anchorYtdSales + sumBy(afterAnchor, weeklySales);
+              ytdFC += (Number(anchor.recap_fc_ytd_pct || 0) / 100) * anchorYtdSales
+                + sumBy(afterAnchor, cs => Number(cs.usage_amount || 0));
+              ytdLab += (Number(anchor.recap_labour_ytd_pct || 0) / 100) * anchorYtdSales
+                + sumBy(afterAnchor, cs => Number(cs.labour_spent || 0));
+            } else {
+              ytdSales += sumBy(ytdRows, weeklySales);
+              ytdFC += sumBy(ytdRows, cs => Number(cs.usage_amount || 0));
+              ytdLab += sumBy(ytdRows, cs => Number(cs.labour_spent || 0));
+            }
           }
 
           // Budgets: from the P&L when present (incl. budget-only uploads),
-          // else the chef summary's stored budget figures.
+          // else the chef summary's stored budget figures. YTD budget comes
+          // from the same anchor row as the YTD actual (not just the current
+          // week's row), so a location whose chef hasn't filed this week no
+          // longer contributes actuals with zero budget.
           if (hasAnyPl) {
             ptdBudget += getVal(id, 'Food Sales', 'current_budget');
             ptdFCBudget += getVal(id, 'Cost of Sales (Food)', 'current_budget');
@@ -563,15 +589,22 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
             ytdBudget += getVal(id, 'Food Sales', 'ytd_budget');
             ytdFCBudget += getVal(id, 'Cost of Sales (Food)', 'ytd_budget');
             ytdLabBudget += getVal(id, 'Kitchen Labour', 'ytd_budget');
-          } else if (curRow) {
-            const pb = Number(curRow.budget_food_sales_period || 0);
-            ptdBudget += pb;
-            ptdFCBudget += (Number(curRow.budget_food_cost_pct || 0) / 100) * pb;
-            ptdLabBudget += (Number(curRow.labour_budget_pct || 0) / 100) * pb;
-            const yb = Number(curRow.recap_sales_ytd_budget || 0);
-            ytdBudget += yb;
-            ytdFCBudget += (Number(curRow.recap_fc_ytd_budget_pct || 0) / 100) * yb;
-            ytdLabBudget += (Number(curRow.recap_labour_ytd_budget_pct || 0) / 100) * yb;
+          } else {
+            if (curRow) {
+              const pb = Number(curRow.budget_food_sales_period || 0);
+              ptdBudget += pb;
+              ptdFCBudget += (Number(curRow.budget_food_cost_pct || 0) / 100) * pb;
+              ptdLabBudget += (Number(curRow.labour_budget_pct || 0) / 100) * pb;
+            }
+            if (anchor) {
+              // Recap YTD budget is through the anchor week; weeks filed after
+              // it each add one week's share of that period's sales budget.
+              const yb = Number(anchor.recap_sales_ytd_budget || 0)
+                + afterAnchor.length * (Number(anchor.budget_food_sales_period || 0) / 4);
+              ytdBudget += yb;
+              ytdFCBudget += (Number(anchor.recap_fc_ytd_budget_pct || 0) / 100) * yb;
+              ytdLabBudget += (Number(anchor.recap_labour_ytd_budget_pct || 0) / 100) * yb;
+            }
           }
         }
         const ptdFCPct = ptdSales > 0 ? (ptdFC / ptdSales) * 100 : 0;
@@ -596,11 +629,15 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
         const wtdLabVariance = wtdLabPct - ptdLabBudgetPct;
 
         return {
-          // Sales budget is a full-period figure; pro-rate it to the weeks elapsed
-          // so PTD/YTD variances don't count budget for weeks we haven't reached.
+          // The period sales budget is a full-period figure, so PTD pro-rates
+          // it to the weeks elapsed. The YTD budget is NOT: both the P&L
+          // export's ytd_budget and the chef recap's estimate already run only
+          // through the reporting week, so YTD variance is a straight
+          // subtraction — deducting "unelapsed weeks" here double-counted them
+          // and showed YTD as favourable when it was behind budget.
           wtdSales, wtdSalesVariance,
           ptdSales, ptdSalesVariance: ptdSales - ptdBudget * Math.min(week, 4) / 4,
-          ytdSales, ytdSalesVariance: ytdSales - (ytdBudget - ptdBudget * (4 - Math.min(week, 4)) / 4),
+          ytdSales, ytdSalesVariance: ytdSales - ytdBudget,
           wtdFCPct, wtdFCVariance,
           ptdFCPct, ptdFCVariance: ptdFCPct - ptdFCBudgetPct,
           ytdFCPct, ytdFCVariance: ytdFCPct - ytdFCBudgetPct,
