@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-17] Fixed consolidated YTD sales variance
+Shipped:   Consolidated YTD variance is now a straight actual-minus-budget — the old formula deducted "unelapsed weeks" from a YTD budget that already ran only through the reporting week, overstating performance by (4−week)/4 × period budget (P13 W2: showed +$961,262, truth −$1,566,781; new formula reproduces Intacct to the dollar, PTD unchanged at −$2,613). Also: no-P&L locations' YTD actuals now anchor to their latest chef recap estimate (matching the per-restaurant lines so totals tie), and YTD budget comes from that same anchor row so a location that missed filing this week no longer adds actuals with zero budget. Typecheck/lint/build identical to baseline.
+Roadmap:   Consolidated YTD accuracy -> complete (pending Michael regenerating the email against live data)
+Decisions: PTD pro-rating kept — the P&L period budget genuinely is a full-period figure, verified against the email's −$2,613.
+Blockers:  none
+Next:      Michael to regenerate the Weekly Culinary Summary email for P13 W2 and confirm the CG Consolidated YTD variance reads ≈ −$1.57M against Intacct.
+
 [2026-08-17] Diagnosed wrong YTD sales variance on consolidated summary
 Shipped:   Diagnosis only, no code change. The consolidated YTD sales variance in the Weekly Culinary Summary email subtracts "unelapsed weeks" budget from the P&L's ytd_budget, but that budget (and the chef recap's) is already through the reporting week — so the variance is inflated favourably by (4−week)/4 × period budget. Verified to the dollar against Intacct FY2026 P13 W2: true YTD food sales variance −$1,566,781; email shows +$961,262; difference exactly 2/4 × $5,056,086. Per-restaurant rows use the correct straight subtraction, so restaurant lines and brand totals disagree. Secondary: locations without a finalized current-week P&L get YTD actuals rebuilt purely from chef-entered weekly sales (unfiled weeks count $0, earlier P&Ls ignored), and a location with year rows but no current-week chef row adds actuals with no budget.
 Roadmap:   Chef PDF correctness -> complete; Consolidated YTD accuracy -> in progress (diagnosed, fix pending Michael's go-ahead)
