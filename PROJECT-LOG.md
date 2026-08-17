@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-17] Chef PDF: all notes now print; page 1 = numbers + summary
+Shipped:   The seven missing chef note fields now render in a new Plans & Commentary section (food-cost commentary, overtime, labour-transfer reasons, discount review, speed of service, features commentary, usage-review table with per-item chef comments). Hard truncation removed from hiring/development/team-members/R&M/cleaning/audit/feature notes — long text paginates. Page 1 is the restaurant's numbers plus one week-in-review summary; the AI summary prompt now includes every note the chef writes. Verified by smoke-rendering a fully populated PDF in Node and probing the output for every section (all present; empty and malformed-data cases render cleanly).
+Roadmap:   Chef PDF correctness -> complete (pending Michael's live check)
+Decisions: Sales/labour action plans moved off page 1 into Plans & Commentary so page 1 stays numbers + summary, per Michael's direction. Committed-actions cap of 8 left in place — still Michael's open call.
+Blockers:  none
+Next:      Michael to regenerate one real week's PDF and confirm layout; then decide on the 8-action cap and dropped-action status handling.
+
 [2026-08-17] Chef name restored to PDF header; chef-notes audit
 Shipped:   Shared PDF builder now looks up the location's chef of record from weekly_summary_users (one chef per restaurant, verified) and prints it in the header — all three generation paths (main screen, guided Regenerate, HQ viewer) name the same person, better than the old behaviour of printing whoever was logged in. Typecheck/lint/build clean vs baseline. Also audited every chef-entered field against what the PDF renders.
 Roadmap:   Chef PDF correctness -> in progress (audit found gaps, awaiting Michael's ruling)
