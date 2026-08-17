@@ -1840,6 +1840,14 @@ export function GuidedWeeklyPackage({
     setGeneratingSummary(true);
     setSummaryError('');
     try {
+      // Every note the chef wrote feeds the summary — including the reviews
+      // that used to be left out (overtime, transfers, discounts, speed of
+      // service, usage) — so the front-page narrative reflects the whole week.
+      const usageComments = usageFlaggedItems
+        .filter((i) => i.comment.trim())
+        .map((i) => `${i.itemName} (${i.direction}): ${i.comment.trim()}`)
+        .join('; ');
+      const transferNotes = summarizeTransfers(transferEntries).notes;
       const chefNotes = [
         formatRecapMetricsForPrompt(recapMetrics),
         foodCostComments && `Food Cost Action Plan: ${foodCostComments}`,
@@ -1852,6 +1860,11 @@ export function GuidedWeeklyPackage({
         cleaningFocus && `Cleaning Focus: ${cleaningFocus}`,
         featuresNotes && `Features: ${featuresNotes}`,
         auditScoreComment && `Audit: ${auditScoreComment}`,
+        overtimeNotes && `Overtime: ${overtimeNotes}`,
+        discountReviewNotes && `Discount Review: ${discountReviewNotes}`,
+        speedOfServiceNotes && `Speed of Service: ${speedOfServiceNotes}`,
+        transferNotes && `Labour Transfers: ${transferNotes}`,
+        usageComments && `Usage Review: ${usageComments}`,
       ].filter(Boolean).join('\n');
 
       const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-chef-summary`;
