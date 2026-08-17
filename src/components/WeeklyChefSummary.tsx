@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Save, Plus, Trash2, LogOut, ChevronDown, FileText, AlertTriangle, Download, ClipboardCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
-import { exportChefSummaryToExcel, exportChefSummaryToPdf, FcapRow, FoodCostCategoryRow, NextPeriodFcap } from '../lib/chefSummaryExport';
+import { exportChefSummaryToExcel } from '../lib/chefSummaryExport';
+import { buildChefSummaryReport } from '../lib/chefSummaryReport';
 import { GuidedWeeklyPackage, GuidedFieldUpdates } from './GuidedWeeklyPackage';
 import { computePlDrivenSummaryFields } from '../lib/summaryPlFields';
 
@@ -142,7 +143,7 @@ interface WeeklyChefSummaryProps {
 }
 
 export function WeeklyChefSummary({ locationId, locationName, summaryId }: WeeklyChefSummaryProps) {
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
   const [formData, setFormData] = useState<WeeklySummaryData>({
     location_id: locationId,
     week_number: 1,
@@ -873,104 +874,23 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
     );
   };
 
+  // Exports reflect saved data (the button is disabled while changes are
+  // unsaved), so build the PDF from the saved rows via the shared report
+  // builder — the same path as the guided package's "Regenerate PDF" and the
+  // HQ Executive Report viewer. It fetches the week-ahead actions and FCAP
+  // itself, so all three surfaces produce identical output and can't drift.
   const handleExportPdf = async () => {
-    let weekEndingDate: string | undefined;
-    try {
-      const { data: calWeek } = await supabase
-        .from('fiscal_calendar')
-        .select('end_date')
-        .eq('fiscal_year', formData.fiscal_year)
-        .eq('period', formData.period_number)
-        .eq('week', formData.week_number)
-        .maybeSingle();
-      weekEndingDate = calWeek?.end_date;
-    } catch {
-      weekEndingDate = undefined;
-    }
-
-    // Fold in the shared FCAP for this period, and — when this is the
-    // period's last week — the new plan already created for next period.
-    let fcapItems: FcapRow[] | undefined;
-    let nextPeriodFcap: NextPeriodFcap | undefined;
-    try {
-      const { data: fcapRow } = await supabase
-        .from('weekly_summary_food_cost_action_plans')
-        .select('items')
-        .eq('location_id', locationId)
-        .eq('fiscal_year', formData.fiscal_year)
-        .eq('period_number', formData.period_number)
-        .maybeSingle();
-      const items = Array.isArray(fcapRow?.items) ? (fcapRow!.items as FcapRow[]) : [];
-      if (items.length > 0) fcapItems = items;
-
-      const { data: periodWeeks } = await supabase
-        .from('fiscal_calendar')
-        .select('week')
-        .eq('fiscal_year', formData.fiscal_year)
-        .eq('period', formData.period_number);
-      const lastWeek = periodWeeks && periodWeeks.length > 0 ? Math.max(...periodWeeks.map((w) => w.week)) : 4;
-      if (formData.week_number >= lastWeek) {
-        const nextFiscalYear = formData.period_number === 13 ? formData.fiscal_year + 1 : formData.fiscal_year;
-        const nextPeriodNumber = formData.period_number === 13 ? 1 : formData.period_number + 1;
-        const { data: nextFcapRow } = await supabase
-          .from('weekly_summary_food_cost_action_plans')
-          .select('items')
-          .eq('location_id', locationId)
-          .eq('fiscal_year', nextFiscalYear)
-          .eq('period_number', nextPeriodNumber)
-          .maybeSingle();
-        const nextItems = Array.isArray(nextFcapRow?.items) ? (nextFcapRow!.items as FcapRow[]) : [];
-        if (nextItems.length > 0) {
-          nextPeriodFcap = { items: nextItems, fiscalYear: nextFiscalYear, periodNumber: nextPeriodNumber };
-        }
-      }
-    } catch {
-      fcapItems = undefined;
-      nextPeriodFcap = undefined;
-    }
-
-    let foodCostCategories: FoodCostCategoryRow[] | undefined;
-    try {
-      const parsed = JSON.parse(formData.final_food_cost_items || '[]');
-      const categories = Array.isArray(parsed) ? parsed : parsed?.categories;
-      if (Array.isArray(categories) && categories.length > 0) {
-        foodCostCategories = categories.map((c: Record<string, unknown>) => ({
-          category: String(c.category ?? ''),
-          opening: Number(c.opening) || 0,
-          glPurchases: Number(c.glPurchases) || 0,
-          closing: Number(c.closing) || 0,
-          waste: Number(c.waste) || 0,
-          actualUsage: Number(c.actualUsage) || 0,
-          idealUsage: Number(c.idealUsage) || 0,
-          variance: Number(c.variance) || 0,
-        }));
-      }
-    } catch {
-      foodCostCategories = undefined;
-    }
-
-    exportChefSummaryToPdf(
-      formData,
+    const result = await buildChefSummaryReport(
+      locationId,
       locationName,
-      weekBudget,
-      actualFoodCostPct,
-      fcVariance,
-      theoreticalFoodCostPct,
-      theoreticalVariance,
-      labourCostPct,
-      lcVariance,
-      user?.name,
-      weekEndingDate,
-      formData.food_sales_labour_push,
-      weekBudget,
-      actualFoodCostPct,
-      labourCostPct,
-      foodCostCategories,
-      undefined,
-      fcapItems,
-      'save',
-      nextPeriodFcap
+      formData.fiscal_year,
+      formData.period_number,
+      formData.week_number,
+      'save'
     );
+    if (!result.ok) {
+      setMessage({ type: 'error', text: result.error });
+    }
   };
 
   if (loading) {

@@ -112,6 +112,10 @@ interface WeeklySummaryData {
   speed_of_service_notes?: string;
   overtime_notes?: string;
   labour_review_action_plan?: string;
+  final_food_cost_comments?: string;
+  features_notes?: string;
+  usage_review_items?: string;
+  labour_transfer_notes?: string;
   ideal_cooks: number;
   current_cooks: number;
   ideal_prep: number;
@@ -288,13 +292,27 @@ function firstNonEmpty(...vals: (string | undefined)[]): string {
   return '';
 }
 
-function splitIntoBullets(text: string, max: number): string[] {
-  if (!text) return [];
-  const parts = text
-    .split(/\n+|(?<=[.!?])\s+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  return parts.slice(0, max);
+// Flagged over/under-usage items the chef reviewed in the guided package,
+// stored as JSON in weekly_summary_chef_summary.usage_review_items.
+interface UsageReviewItem {
+  itemName: string;
+  direction: 'under' | 'over';
+  weekVariance: number;
+  fourWeekVariance: number | null;
+  confirmed: boolean;
+  comment: string;
+}
+
+function parseUsageReviewItems(raw: string | undefined | null): UsageReviewItem[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((i): i is UsageReviewItem => Boolean(i && typeof i.itemName === 'string' && i.itemName.trim()))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 export function exportChefSummaryToPdf(
@@ -410,15 +428,24 @@ export function exportChefSummaryToPdf(
 
   let y = calloutY + calloutH + 18;
 
-  // "Why" narrative
+  // Week-in-review summary alongside the numbers. Prefer the chef's
+  // AI-assisted summary (generated from all of the week's notes); otherwise
+  // stitch one from the main saved plans so the numbers never stand alone.
+  // The full, untruncated notes follow in Plans & Commentary.
   const narrative = firstNonEmpty(
     data.ai_summary,
-    [data.food_cost_summary, data.labour_summary, data.action_plan_summary].filter(Boolean).join(' ')
+    [
+      data.final_food_cost_comments || data.food_cost_summary,
+      data.labour_review_action_plan || data.labour_summary,
+      data.sales_action_plan || data.action_plan_summary,
+    ]
+      .filter((v) => v && v.trim())
+      .join(' ')
   );
   if (narrative) {
     doc.setFontSize(9.5);
     doc.setFont('helvetica', 'italic');
-    const wrapped = truncateLines(doc, narrative, contentWidth, 6);
+    const wrapped = truncateLines(doc, narrative, contentWidth, 12);
     doc.text(wrapped, margin, y);
     y += wrapped.length * 12 + 16;
   }
@@ -497,23 +524,8 @@ export function exportChefSummaryToPdf(
 
   y = Math.max(salesTableY, fcTableY, lcTableY) + 22;
 
-  // Sales Action Plan + Labour Summary (moved up from the former notes appendix).
-  const renderNoteBlock = (title: string, body: string) => {
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text(title, margin, y);
-    y += 13;
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'normal');
-    const lines = doc.splitTextToSize(body && body.trim() ? body.trim() : '—', contentWidth);
-    doc.text(lines, margin, y);
-    y += lines.length * 11 + 14;
-  };
-
-  renderNoteBlock('Sales Action Plan', data.sales_action_plan || data.action_plan_summary || '');
-  // The chef's labour action plan is saved as labour_review_action_plan; the
-  // legacy labour_summary column is never populated on save, so read the former.
-  renderNoteBlock('Labour Action Plan', data.labour_review_action_plan || data.labour_summary || '');
+  // Page 1 stays the restaurant's numbers plus the summary above; the full
+  // sales/labour/food-cost plans print untruncated in Plans & Commentary.
 
   // COGS / category breakdown
   if (foodCostCategories && foodCostCategories.length > 0) {
@@ -626,23 +638,48 @@ export function exportChefSummaryToPdf(
     y += 10;
   }
 
-  const addShortSection = (title: string, body: string, maxLines = 2) => {
+  const stampFooter = () => {
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text(`Generated ${new Date().toLocaleDateString()}`, margin, pageHeight - 16);
+    doc.setTextColor(0, 0, 0);
+  };
+
+  // Break to a fresh page when the next block wouldn't fit, so nothing the
+  // chef wrote gets clipped at a page edge.
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageHeight - 40) {
+      stampFooter();
+      doc.addPage();
+      y = margin;
+    }
+  };
+
+  // Full-text note section: chef-entered notes print in full and flow across
+  // pages — no truncation.
+  const renderNoteSection = (title: string, body?: string | null) => {
+    const text = (body || '').trim() || '—';
+    ensureSpace(36);
     doc.setFontSize(9.5);
     doc.setFont('helvetica', 'bold');
     doc.text(title, margin, y);
     y += 11;
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'normal');
-    const lines = truncateLines(doc, body || '—', contentWidth, maxLines);
-    doc.text(lines, margin, y);
-    y += lines.length * 10.5 + 14;
+    for (const line of doc.splitTextToSize(text, contentWidth) as string[]) {
+      ensureSpace(12);
+      doc.text(line, margin, y);
+      y += 10.5;
+    }
+    y += 14;
   };
 
-  addShortSection('Hiring Needs', data.hiring_notes);
-  addShortSection('Development Path Updates', data.development_path_updates);
-  addShortSection('Team Members of Note', data.tm_mots_of_note);
+  renderNoteSection('Hiring Needs', data.hiring_notes);
+  renderNoteSection('Development Path Updates', data.development_path_updates);
+  renderNoteSection('Team Members of Note', data.tm_mots_of_note);
 
   y += 8;
+  ensureSpace(80);
   doc.setFontSize(11.5);
   doc.setFont('helvetica', 'bold');
   doc.text('Service & Guest Experience', margin, y);
@@ -655,26 +692,31 @@ export function exportChefSummaryToPdf(
       data.qsr_expo_time || '—',
       data.window_time || '—',
       pct(data.last_audit_score_pct),
-      (data.audit_score_comment || '—').slice(0, 60) + ((data.audit_score_comment || '').length > 60 ? '…' : ''),
+      data.audit_score_comment || '—',
     ]],
-    styles: { fontSize: 8, cellPadding: 4, halign: 'center' },
+    styles: { fontSize: 8, cellPadding: 4, halign: 'center', valign: 'top' },
     headStyles,
-    columnStyles: { 3: { halign: 'left' } },
+    columnStyles: { 3: { halign: 'left', cellWidth: contentWidth * 0.45 } },
     margin: { left: margin, right: margin },
     tableWidth: contentWidth,
   });
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 16;
 
+  if (data.speed_of_service_notes && data.speed_of_service_notes.trim()) {
+    renderNoteSection('Speed of Service Notes', data.speed_of_service_notes);
+  }
+
   if (data.feature_items && data.feature_items.filter((f) => f.name).length > 0) {
+    ensureSpace(60);
     autoTable(doc, {
       startY: y,
       head: [['Feature Item', 'Sold', 'Notes']],
       body: data.feature_items
         .filter((f) => f.name)
-        .slice(0, 5)
-        .map((f) => [f.name, String(f.sold), (f.notes || '').slice(0, 40)]),
-      styles: { fontSize: 8, cellPadding: 3 },
+        .map((f) => [f.name, String(f.sold), f.notes || '']),
+      styles: { fontSize: 8, cellPadding: 3, valign: 'top' },
       headStyles,
+      columnStyles: { 0: { cellWidth: 130 }, 1: { halign: 'center', cellWidth: 40 } },
       margin: { left: margin, right: margin },
       tableWidth: contentWidth,
     });
@@ -683,29 +725,72 @@ export function exportChefSummaryToPdf(
     y += 10;
   }
 
-  // R&M / Cleaning Focus — flags only
-  doc.setFontSize(11.5);
-  doc.setFont('helvetica', 'bold');
-  doc.text('R&M / Cleaning Focus', margin, y);
-  y += 12;
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
-  const rmFlags = [
-    ...splitIntoBullets(data.rm_issues || data.rm_issues_cleaning_focus, 2),
-    ...splitIntoBullets(data.cleaning_focus || '', 2),
-  ].slice(0, 3);
-  if (rmFlags.length === 0) {
-    doc.text('• No flags this week.', margin, y);
-    y += 11;
-  } else {
-    for (const flag of rmFlags) {
-      const line = doc.splitTextToSize(`• ${flag}`, contentWidth).slice(0, 1);
-      doc.text(line, margin, y);
-      y += 11;
-    }
+  if (data.features_notes && data.features_notes.trim()) {
+    renderNoteSection('Features Commentary', data.features_notes);
   }
 
-  y += 18;
+  renderNoteSection('R&M Issues', data.rm_issues || data.rm_issues_cleaning_focus);
+  renderNoteSection('Cleaning Focus', data.cleaning_focus);
+
+  // ---------- PLANS & COMMENTARY ----------
+  // Every written plan and review the chef saved, in full. Several of these
+  // previously never reached the PDF at all (food-cost commentary, overtime,
+  // transfers, discount review, usage review) — the chef writes it, it prints.
+  ensureSpace(60);
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Plans & Commentary', margin, y);
+  y += 16;
+
+  renderNoteSection('Sales Action Plan', data.sales_action_plan || data.action_plan_summary);
+  // The chef's labour action plan is saved as labour_review_action_plan; the
+  // legacy labour_summary column is never populated on save, so read the former.
+  renderNoteSection('Labour Action Plan', data.labour_review_action_plan || data.labour_summary);
+  renderNoteSection('Food Cost Commentary', data.final_food_cost_comments || data.food_cost_summary);
+  if (data.overtime_notes && data.overtime_notes.trim()) {
+    renderNoteSection('Overtime Notes', data.overtime_notes);
+  }
+  if (data.labour_transfer_notes && data.labour_transfer_notes.trim()) {
+    renderNoteSection('Labour Transfers', data.labour_transfer_notes);
+  }
+  if (data.discount_review_notes && data.discount_review_notes.trim()) {
+    renderNoteSection('Discount Review', data.discount_review_notes);
+  }
+
+  const usageItems = parseUsageReviewItems(data.usage_review_items);
+  if (usageItems.length > 0) {
+    ensureSpace(70);
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Usage Review — Flagged Items', margin, y);
+    y += 6;
+    autoTable(doc, {
+      startY: y,
+      head: [['Item', 'Direction', 'Week Var', '4-Wk Var', 'Confirmed', 'Chef Comment']],
+      body: usageItems.map((i) => [
+        i.itemName,
+        i.direction === 'over' ? 'Over' : 'Under',
+        currency(i.weekVariance),
+        i.fourWeekVariance == null ? '—' : currency(i.fourWeekVariance),
+        i.confirmed ? 'Yes' : 'No',
+        i.comment || '—',
+      ]),
+      styles: { fontSize: 7.5, cellPadding: 3, valign: 'top' },
+      headStyles,
+      columnStyles: {
+        0: { cellWidth: 110 },
+        1: { halign: 'center', cellWidth: 45 },
+        2: { halign: 'right', cellWidth: 50 },
+        3: { halign: 'right', cellWidth: 50 },
+        4: { halign: 'center', cellWidth: 48 },
+      },
+      margin: { left: margin, right: margin },
+      tableWidth: contentWidth,
+    });
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 16;
+  }
+
+  y += 4;
 
   // ACTIONS FOR THE WEEK AHEAD
   // Prefer the chef's explicit, committed actions rendered as a table; fall back to

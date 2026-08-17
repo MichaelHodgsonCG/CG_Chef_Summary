@@ -52,6 +52,17 @@ export async function buildChefSummaryReport(
     .maybeSingle();
   const weekEndingDate = cal?.end_date as string | undefined;
 
+  // Print the location's chef of record (one chef per restaurant), so the
+  // header names the same person no matter who generates the report.
+  let chefName: string | undefined;
+  const { data: chefUser } = await supabase
+    .from('weekly_summary_users')
+    .select('name')
+    .eq('role', 'chef')
+    .ilike('restaurant', locationName)
+    .maybeSingle();
+  if (chefUser?.name) chefName = chefUser.name as string;
+
   const sales = row.food_sales_labour_push || 0;
   const actualFoodCostPct = sales > 0 ? (row.usage_amount / sales) * 100 : 0;
   const fcVariance = actualFoodCostPct - (row.budget_food_cost_pct || 0);
@@ -129,7 +140,7 @@ export async function buildChefSummaryReport(
 
   const url = exportChefSummaryToPdf(
     row, locationName, weekBudget, actualFoodCostPct, fcVariance, theoreticalFoodCostPct,
-    theoreticalVariance, labourCostPct, lcVariance, undefined, weekEndingDate,
+    theoreticalVariance, labourCostPct, lcVariance, chefName, weekEndingDate,
     sales, weekBudget, actualFoodCostPct, labourCostPct,
     foodCostCategories, weekAheadActions, fcapItems, outputMode, nextPeriodFcap
   ) as string | void;
