@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-17] Fix chef-downloaded PDFs missing committed actions
+Shipped:   Main-screen "Export to PDF" on the Weekly Chef Summary now routes through buildChefSummaryReport (the shared builder used by the guided package's Regenerate PDF and the HQ Executive Report). The legacy hand-assembled path passed undefined for weekAheadActions and never queried weekly_summary_actions, so chef-downloaded/emailed PDFs showed the "no committed actions" placeholder despite saved actions. ~100 lines of duplicated FCAP/food-cost assembly deleted; save-before-export guard unchanged. Verified root cause in code myself (WeeklyChefSummary.tsx:969 passed undefined); typecheck/lint deltas clean vs baseline; production build passes. Not yet verified against live data.
+Roadmap:   Chef PDF correctness -> complete (pending Michael's live check)
+Decisions: Main-screen PDFs no longer print the exporting chef's name — the shared builder omits it, matching the guided Regenerate and HQ PDFs; accepted as the cost of one canonical output.
+Blockers:  none
+Next:      Michael to spot-check one live week (e.g. Wildcraft FY2026 P13 W2) from the main screen's Export to PDF, and rule on the actions-table polish items below.
+
 [2026-08-13] Adopt CG Universal Task List Standard protocol
 Shipped:   New protocol persisted in CLAUDE.md: before designing/building any task/checklist/action/assignment feature, read the "CG Universal Task List Standard" from the CG bus (newest active version, metadata kind='standard') and conform to its §6 checklist; deviations need Michael's explicit sign-off filed as a decision. Verified the standard exists on the bus (UTL v1, active). No application code changed.
 Roadmap:   Task list standard adoption -> complete (protocol persisted; applies at build time)
