@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-17] Diagnosed wrong YTD sales variance on consolidated summary
+Shipped:   Diagnosis only, no code change. The consolidated YTD sales variance in the Weekly Culinary Summary email subtracts "unelapsed weeks" budget from the P&L's ytd_budget, but that budget (and the chef recap's) is already through the reporting week — so the variance is inflated favourably by (4−week)/4 × period budget. Verified to the dollar against Intacct FY2026 P13 W2: true YTD food sales variance −$1,566,781; email shows +$961,262; difference exactly 2/4 × $5,056,086. Per-restaurant rows use the correct straight subtraction, so restaurant lines and brand totals disagree. Secondary: locations without a finalized current-week P&L get YTD actuals rebuilt purely from chef-entered weekly sales (unfiled weeks count $0, earlier P&Ls ignored), and a location with year rows but no current-week chef row adds actuals with no budget.
+Roadmap:   Chef PDF correctness -> complete; Consolidated YTD accuracy -> in progress (diagnosed, fix pending Michael's go-ahead)
+Decisions: none
+Blockers:  none
+Next:      On Michael's go-ahead: drop the unelapsed-week subtraction in WeeklyExecutiveReport (one line) and decide how Path-B YTD actuals should anchor to the latest P&L baseline.
+
 [2026-08-17] Chef PDF: all notes now print; page 1 = numbers + summary
 Shipped:   The seven missing chef note fields now render in a new Plans & Commentary section (food-cost commentary, overtime, labour-transfer reasons, discount review, speed of service, features commentary, usage-review table with per-item chef comments). Hard truncation removed from hiring/development/team-members/R&M/cleaning/audit/feature notes — long text paginates. Page 1 is the restaurant's numbers plus one week-in-review summary; the AI summary prompt now includes every note the chef writes. Verified by smoke-rendering a fully populated PDF in Node and probing the output for every section (all present; empty and malformed-data cases render cleanly).
 Roadmap:   Chef PDF correctness -> complete (pending Michael's live check)
