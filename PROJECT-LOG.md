@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-17] Decision: chef email login runs parallel to PINs, then PINs retire
+Shipped:   Nothing built — decision session. Reviewed the current auth: chefs use plaintext PINs against weekly_summary_users; office cohort already enters via CGOPS SSO handoff (cgopsSession.ts). Advised against sharing PIN credentials with Production Center (extends a known git-history exposure into a new app); Production Center launches on CGOPS email login instead.
+Roadmap:   Chef email auth (parallel run) -> planned; PIN retirement -> planned (after adoption)
+Decisions: Michael: Production Center uses email auth from day one. Weekly Summary adds CGOPS email login for chefs alongside the existing PIN door, team migrates gradually, PINs retire once adoption is complete. PIN rotation deliberately skipped given the retirement path.
+Blockers:  none
+Next:      When Michael green-lights the build: bind chef CGOPS accounts to locations, add the email door to the Weekly Summary login, and track PIN vs email usage to time retirement.
+
 [2026-08-17] Fixed consolidated YTD sales variance
 Shipped:   Consolidated YTD variance is now a straight actual-minus-budget — the old formula deducted "unelapsed weeks" from a YTD budget that already ran only through the reporting week, overstating performance by (4−week)/4 × period budget (P13 W2: showed +$961,262, truth −$1,566,781; new formula reproduces Intacct to the dollar, PTD unchanged at −$2,613). Also: no-P&L locations' YTD actuals now anchor to their latest chef recap estimate (matching the per-restaurant lines so totals tie), and YTD budget comes from that same anchor row so a location that missed filing this week no longer adds actuals with zero budget. Typecheck/lint/build identical to baseline.
 Roadmap:   Consolidated YTD accuracy -> complete (pending Michael regenerating the email against live data)
