@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-23] Weekly Package 2.0 beta live: merged, deployed, Guelph piloting
+Shipped:   PR #60 merged to main (c59535a); Vercel production deployment of that commit verified READY. Beta flag guided_package_v2 enabled for Beertown Guelph (verified by read-back — the only flagged location). From this week's filing, Guelph's chef sees the week recap and the sales/discounts prefills; every other location is unchanged.
+Roadmap:   Chef workflow auto-prefill -> beta live at one pilot location
+Decisions: Pilot = Beertown Guelph (Michael's pick).
+Blockers:  none
+Next:      Watch Guelph's first beta filing this week; then decide on expanding the pilot and building the next prefills (labour/promo/team).
+
 [2026-08-23] Weekly Package 2.0 beta: CGOPS prefills + AI week recap
 Shipped:   chef-week-pack edge function (deployed) assembles a location's week from the CGOPS daily feeds: daily food sales (POS FOOD-* classes), BOH labour estimate (SLP), discounts pre-grouped into the chef review categories, and an AI "week that was" recap from daily journals/recaps/guest feedback. Guided package shows prefill panels on the sales and discounts steps plus the recap on the start step — one click to apply, always chef-overwritable (editing dailies or uploading the usual reports replaces the prefill). Gated per-location by new weekly_summary_beta_features table (flag guided_package_v2, default OFF — existing workflow untouched). Verified live against Wildcraft P13 W3: 6/7 POS days summed correctly, labour $18,928.82, discounts categorized (Quality Issue 4/$119.50, Steak Over/Under 4/$107), recap generated. POS feed history starts 2026-08-17, so prefills only exist from this reporting week forward.
 Roadmap:   Chef workflow auto-prefill -> in progress (sales + discounts + recap shipped to beta; labour/promo/team next)
