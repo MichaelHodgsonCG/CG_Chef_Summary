@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-23] Audit: chef workflow fields CGOPS daily data could prefill
+Shipped:   Audit only, no code. Mapped all 18 guided-package steps against CGOPS platform daily tables and verified feed freshness (slp_sales/labor/promo, pos_daily_summary, pos_void_items, discount_records, daily_logbook, location_daily_recaps, guest_feedback all current through 2026-08-22). Strong prefill candidates: sales step (slp_sales_data / POS FOOD-* classes replace the profit-centre upload), discounts step (discount_records replace the CSV upload), kitchen labour (slp_labor_data BOH dept), BOH promo (slp_promo_data), team/staffing + hires (People Center), narrative enrichment (logbook journals, daily recaps, AI findings, guest feedback), audit score (Audit Center once adopted), usage review possibly from HQ's existing item-variance ingest. Not coverable yet: speed-of-service times, GL purchases by category, inventory/on-hand, explicit overtime split, per-item feature sales.
+Roadmap:   Chef workflow auto-prefill -> planned (scope pending Michael's pick of candidates)
+Decisions: none
+Blockers:  none
+Next:      Michael to pick which prefills to build first; recommend starting with the three file-upload replacements (sales, discounts, usage).
+
 [2026-08-17] Decision: chef email login runs parallel to PINs, then PINs retire
 Shipped:   Nothing built — decision session. Reviewed the current auth: chefs use plaintext PINs against weekly_summary_users; office cohort already enters via CGOPS SSO handoff (cgopsSession.ts). Advised against sharing PIN credentials with Production Center (extends a known git-history exposure into a new app); Production Center launches on CGOPS email login instead.
 Roadmap:   Chef email auth (parallel run) -> planned; PIN retirement -> planned (after adoption)
