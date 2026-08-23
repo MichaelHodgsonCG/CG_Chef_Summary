@@ -1,5 +1,26 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-23] Weekly Package 2.0 beta: CGOPS prefills + AI week recap
+Shipped:   chef-week-pack edge function (deployed) assembles a location's week from the CGOPS daily feeds: daily food sales (POS FOOD-* classes), BOH labour estimate (SLP), discounts pre-grouped into the chef review categories, and an AI "week that was" recap from daily journals/recaps/guest feedback. Guided package shows prefill panels on the sales and discounts steps plus the recap on the start step — one click to apply, always chef-overwritable (editing dailies or uploading the usual reports replaces the prefill). Gated per-location by new weekly_summary_beta_features table (flag guided_package_v2, default OFF — existing workflow untouched). Verified live against Wildcraft P13 W3: 6/7 POS days summed correctly, labour $18,928.82, discounts categorized (Quality Issue 4/$119.50, Steak Over/Under 4/$107), recap generated. POS feed history starts 2026-08-17, so prefills only exist from this reporting week forward.
+Roadmap:   Chef workflow auto-prefill -> in progress (sales + discounts + recap shipped to beta; labour/promo/team next)
+Decisions: Beta gate is a per-location DB flag, not a build split — one codebase, pilots opt in, everyone else unchanged on Monday. SLP total-sales figure not shown as a "mismatch warning" against food-only sales (different denominators).
+Blockers:  Branch not yet merged to main; no pilot locations flagged yet — both are Michael's call.
+Next:      Michael to name the pilot locations (one SQL insert each) and merge when ready; then watch the first beta filings.
+
+[2026-08-23] Audit: chef workflow fields CGOPS daily data could prefill
+Shipped:   Audit only, no code. Mapped all 18 guided-package steps against CGOPS platform daily tables and verified feed freshness (slp_sales/labor/promo, pos_daily_summary, pos_void_items, discount_records, daily_logbook, location_daily_recaps, guest_feedback all current through 2026-08-22). Strong prefill candidates: sales step (slp_sales_data / POS FOOD-* classes replace the profit-centre upload), discounts step (discount_records replace the CSV upload), kitchen labour (slp_labor_data BOH dept), BOH promo (slp_promo_data), team/staffing + hires (People Center), narrative enrichment (logbook journals, daily recaps, AI findings, guest feedback), audit score (Audit Center once adopted), usage review possibly from HQ's existing item-variance ingest. Not coverable yet: speed-of-service times, GL purchases by category, inventory/on-hand, explicit overtime split, per-item feature sales.
+Roadmap:   Chef workflow auto-prefill -> planned (scope pending Michael's pick of candidates)
+Decisions: none
+Blockers:  none
+Next:      Michael to pick which prefills to build first; recommend starting with the three file-upload replacements (sales, discounts, usage).
+
+[2026-08-17] Decision: chef email login runs parallel to PINs, then PINs retire
+Shipped:   Nothing built — decision session. Reviewed the current auth: chefs use plaintext PINs against weekly_summary_users; office cohort already enters via CGOPS SSO handoff (cgopsSession.ts). Advised against sharing PIN credentials with Production Center (extends a known git-history exposure into a new app); Production Center launches on CGOPS email login instead.
+Roadmap:   Chef email auth (parallel run) -> planned; PIN retirement -> planned (after adoption)
+Decisions: Michael: Production Center uses email auth from day one. Weekly Summary adds CGOPS email login for chefs alongside the existing PIN door, team migrates gradually, PINs retire once adoption is complete. PIN rotation deliberately skipped given the retirement path.
+Blockers:  none
+Next:      When Michael green-lights the build: bind chef CGOPS accounts to locations, add the email door to the Weekly Summary login, and track PIN vs email usage to time retirement.
+
 [2026-08-17] Fixed consolidated YTD sales variance
 Shipped:   Consolidated YTD variance is now a straight actual-minus-budget — the old formula deducted "unelapsed weeks" from a YTD budget that already ran only through the reporting week, overstating performance by (4−week)/4 × period budget (P13 W2: showed +$961,262, truth −$1,566,781; new formula reproduces Intacct to the dollar, PTD unchanged at −$2,613). Also: no-P&L locations' YTD actuals now anchor to their latest chef recap estimate (matching the per-restaurant lines so totals tie), and YTD budget comes from that same anchor row so a location that missed filing this week no longer adds actuals with zero budget. Typecheck/lint/build identical to baseline.
 Roadmap:   Consolidated YTD accuracy -> complete (pending Michael regenerating the email against live data)

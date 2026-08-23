@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { fetchLabourPlBaseline, fetchSalesPlBaseline, fetchFoodCostPlBaseline, getWeeksRemainingInYear, LabourPlBaseline, SalesPlBaseline, FoodCostPlBaseline } from '../lib/needToSave';
 import { NextPeriodFcap } from '../lib/chefSummaryExport';
 import { buildChefSummaryReport } from '../lib/chefSummaryReport';
+import { ChefWeekPack, fetchChefWeekPack, isBetaFeatureEnabled, GUIDED_PACKAGE_V2 } from '../lib/weekPack';
 
 type GuidedStep = 'start' | 'sales' | 'transfers' | 'overtime' | 'review' | 'discounts' | 'speedOfService' | 'salesRecap' | 'cogs' | 'purchases' | 'usageReview' | 'finalFoodCost' | 'finalFoodCostRecap' | 'nextPeriodFcap' | 'team' | 'facilities' | 'features' | 'audit' | 'recap';
 
@@ -1222,6 +1223,29 @@ export function GuidedWeeklyPackage({
     onFieldsChange?.(updates);
     setRecapMetrics((prev) => ({ ...prev, ...updates }));
   };
+
+  // Weekly Package 2.0 (beta): per-location flag; when on, the CGOPS daily
+  // feeds prefill sales/discounts and an AI week recap shows on the start
+  // step. Flag off (the default) leaves the workflow exactly as before.
+  const [weekPack, setWeekPack] = useState<ChefWeekPack | null>(null);
+  const [weekPackLoading, setWeekPackLoading] = useState(false);
+  useEffect(() => {
+    if (!locationId || !fiscalYear || !periodNumber || !weekNumber) return;
+    let cancelled = false;
+    (async () => {
+      const enabled = await isBetaFeatureEnabled(locationId, GUIDED_PACKAGE_V2);
+      if (cancelled || !enabled) return;
+      setWeekPackLoading(true);
+      const pack = await fetchChefWeekPack(locationId, fiscalYear, periodNumber, weekNumber);
+      if (!cancelled) {
+        setWeekPack(pack);
+        setWeekPackLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [locationId, fiscalYear, periodNumber, weekNumber]);
   const [salesBudget, setSalesBudget] = useState(
     initialValues?.budget_food_sales_period ? String(initialValues.budget_food_sales_period) : ''
   );
@@ -1495,6 +1519,48 @@ export function GuidedWeeklyPackage({
     } catch (err) {
       setDiscountsError(err instanceof Error ? err.message : 'Failed to parse this report.');
     }
+  };
+
+  // Weekly Package 2.0 (beta): apply the CGOPS-derived prefills. They build
+  // the same result objects the report uploads produce, so every downstream
+  // step behaves identically — and uploading a report afterwards overwrites
+  // them, keeping the chef in control. Overtime/doubletime aren't in the
+  // CGOPS feeds yet, so they stay 0 unless the chef uploads the report.
+  const handleUseWeekPackSales = () => {
+    if (!weekPack) return;
+    const result: ProfitCenterParseResult = {
+      salesDaily: [...weekPack.sales.salesDaily],
+      salesTotal: weekPack.sales.salesTotal,
+      labourDaily: [...weekPack.labour.labourDaily],
+      labourTotal: weekPack.labour.labourTotal ?? 0,
+      overtimeDaily: [0, 0, 0, 0, 0, 0, 0],
+      overtimeTotal: 0,
+      doubletimeDaily: [0, 0, 0, 0, 0, 0, 0],
+      doubletimeTotal: 0,
+      statHolidayTotal: 0,
+    };
+    setSalesFile(null);
+    setSalesError('');
+    setSalesResult(result);
+    const totals = summarizeTransfers(transferEntries);
+    onFieldsChange?.({
+      food_sales_labour_push: result.salesTotal,
+      labour_spent: result.labourTotal - totals.vacation - totals.management - totals.statHoliday - totals.other,
+      overtime_amount: 0,
+    });
+  };
+
+  const handleUseWeekPackDiscounts = () => {
+    if (!weekPack) return;
+    const result: DiscountsParseResult = {
+      days: weekPack.discounts.days,
+      categories: weekPack.discounts.categories,
+    };
+    setDiscountsFile(null);
+    setDiscountsError('');
+    setDiscountsResult(result);
+    setIgnoredDiscountItems(new Set());
+    onFieldsChange?.({ boh_promo_amount: effectiveDiscountsTotal(result, new Set()) });
   };
 
   const handleToggleIgnoreDiscount = (categoryLabel: string, itemDesc: string) => {
@@ -1940,6 +2006,8 @@ export function GuidedWeeklyPackage({
               }
             : null
         }
+        pack={weekPack}
+        onUsePack={handleUseWeekPackSales}
         onBack={() => setStep('start')}
         onNext={() => setStep('transfers')}
       />
@@ -2001,6 +2069,8 @@ export function GuidedWeeklyPackage({
         ignoredItems={ignoredDiscountItems}
         onToggleIgnore={handleToggleIgnoreDiscount}
         savedPromoAmount={initialValues?.boh_promo_amount ?? 0}
+        pack={weekPack}
+        onUsePack={handleUseWeekPackDiscounts}
         onBack={() => setStep('review')}
         onNext={() => setStep('speedOfService')}
       />
@@ -2224,6 +2294,8 @@ export function GuidedWeeklyPackage({
         fiscalYear={fiscalYear}
         periodNumber={periodNumber}
         weekNumber={weekNumber}
+        weekRecap={weekPack?.recap}
+        weekRecapLoading={weekPackLoading}
         onStart={() => setStep('sales')}
       />
     );
@@ -2300,6 +2372,8 @@ function GuidedPackageStart({
   fiscalYear,
   periodNumber,
   weekNumber,
+  weekRecap,
+  weekRecapLoading,
   onStart,
 }: {
   locationName: string;
@@ -2307,6 +2381,8 @@ function GuidedPackageStart({
   fiscalYear?: number;
   periodNumber?: number;
   weekNumber?: number;
+  weekRecap?: string | null;
+  weekRecapLoading?: boolean;
   onStart: () => void;
 }) {
   const [priorActions, setPriorActions] = useState<PriorAction[]>([]);
@@ -2466,6 +2542,26 @@ function GuidedPackageStart({
         </div>
       )}
 
+      {weekRecapLoading && (
+        <p className="mt-6 text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+          Pulling your week's recap from CGOPS…
+        </p>
+      )}
+      {weekRecap && (
+        <div className="mt-6 border border-sky-200 bg-sky-50 rounded-lg p-4">
+          <p className="text-sm font-semibold text-sky-900">
+            The week that was{' '}
+            <span className="text-[10px] font-bold uppercase tracking-wide bg-sky-600 text-white rounded px-1.5 py-0.5 align-middle">
+              2.0 beta
+            </span>
+          </p>
+          <p className="text-sm text-sky-900 mt-2 leading-relaxed">{weekRecap}</p>
+          <p className="text-xs text-sky-800/80 mt-2">
+            AI recap from your location's daily journals, recaps, and guest feedback — a memory-jogger before you write your summary.
+          </p>
+        </div>
+      )}
+
       <button
         onClick={onStart}
         className="mt-8 w-full bg-cg-accent text-white font-medium py-3 rounded-lg hover:bg-cg-accentHover transition-colors"
@@ -2487,6 +2583,8 @@ function GuidedSalesStep({
   onFileSelect,
   onSalesDailyChange,
   savedTotals,
+  pack,
+  onUsePack,
   onBack,
   onNext,
 }: {
@@ -2500,6 +2598,8 @@ function GuidedSalesStep({
   onFileSelect: (file: File) => void;
   onSalesDailyChange: (dayIndex: number, value: string) => void;
   savedTotals?: { sales: number; labour: number; overtime: number } | null;
+  pack?: ChefWeekPack | null;
+  onUsePack?: () => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -2564,6 +2664,44 @@ function GuidedSalesStep({
           />
         </div>
       </div>
+
+      {pack && pack.sales.salesTotal > 0 && (
+        <div className="mt-6 border border-sky-200 bg-sky-50 rounded-lg p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-sky-900">
+                Prefill from CGOPS daily data{' '}
+                <span className="text-[10px] font-bold uppercase tracking-wide bg-sky-600 text-white rounded px-1.5 py-0.5 align-middle">
+                  2.0 beta
+                </span>
+              </p>
+              <p className="text-sm text-sky-900 mt-1">
+                Food sales for this week: <span className="font-semibold">${formatCurrency(pack.sales.salesTotal)}</span>
+                {' '}({pack.meta.posDaysFound}/7 days from the POS feed)
+                {pack.labour.labourTotal != null && (
+                  <> · BOH labour est. <span className="font-semibold">${formatCurrency(pack.labour.labourTotal)}</span></>
+                )}
+              </p>
+              {pack.meta.posDaysFound < 7 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  Only {pack.meta.posDaysFound} of 7 days are in so far — if a day is missing, wait for the morning feed or edit it in after applying.
+                </p>
+              )}
+              <p className="text-xs text-sky-800/80 mt-1">
+                You can edit any daily number after applying. Overtime isn't in the feed yet —
+                if you had overtime this week, upload the Profit Center Report instead (uploading always replaces the prefill).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onUsePack}
+              className="shrink-0 bg-sky-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-sky-500 transition-colors"
+            >
+              {result ? 'Replace with these numbers' : 'Use these numbers'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8">
         <h3 className="text-base font-semibold text-slate-800">Upload Sales Report</h3>
@@ -3276,6 +3414,8 @@ function GuidedDiscountsStep({
   ignoredItems,
   onToggleIgnore,
   savedPromoAmount,
+  pack,
+  onUsePack,
   onBack,
   onNext,
 }: {
@@ -3288,6 +3428,8 @@ function GuidedDiscountsStep({
   ignoredItems: Set<string>;
   onToggleIgnore: (categoryLabel: string, itemDesc: string) => void;
   savedPromoAmount?: number;
+  pack?: ChefWeekPack | null;
+  onUsePack?: () => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -3305,9 +3447,50 @@ function GuidedDiscountsStep({
   const adjustedDiscountsTotal = effectiveDiscountsTotal(result, ignoredItems);
   const ignoredDiscountsTotal = grossDiscountsTotal - adjustedDiscountsTotal;
 
+  const packDiscountsTotal = pack
+    ? pack.discounts.categories.reduce((s, c) => s + c.totalAmount, 0)
+    : 0;
+
   return (
     <div className="max-w-2xl mx-auto bg-white rounded-xl border border-slate-200 shadow-sm p-8">
       <StepProgressHeader meta={STEP_META.discounts} />
+
+      {pack && pack.meta.discountRowCount > 0 && (
+        <div className="mt-6 border border-sky-200 bg-sky-50 rounded-lg p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-sky-900">
+                Prefill from CGOPS daily data{' '}
+                <span className="text-[10px] font-bold uppercase tracking-wide bg-sky-600 text-white rounded px-1.5 py-0.5 align-middle">
+                  2.0 beta
+                </span>
+              </p>
+              <p className="text-sm text-sky-900 mt-1">
+                This week's discounts are already captured:{' '}
+                <span className="font-semibold">
+                  ${packDiscountsTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>{' '}
+                across{' '}
+                {pack.discounts.categories
+                  .filter((c) => c.totalCount > 0)
+                  .map((c) => `${c.label} (${c.totalCount})`)
+                  .join(', ') || 'the review categories'}
+                .
+              </p>
+              <p className="text-xs text-sky-800/80 mt-1">
+                Applying fills the same review below — you can still exclude individual items, and uploading a CSV always replaces the prefill.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onUsePack}
+              className="shrink-0 bg-sky-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-sky-500 transition-colors"
+            >
+              {result ? 'Replace with CGOPS data' : 'Use CGOPS data'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-6">
         <h3 className="text-base font-semibold text-slate-800">Upload Discounts Report</h3>
