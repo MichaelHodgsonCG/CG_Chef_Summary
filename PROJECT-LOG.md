@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-24] Team summary: no locations named beside negatives
+Shipped:   Team-summary prompt rule changed per Michael: location names appear only beside wins; all challenges stay broad and collective ("a few locations fell short..."), with per-location detail left to the report tables below. Deployed (server-side only, no frontend change) and W3 regenerated — verified the new team summary names Burlington/Bauer/Toronto for wins only, challenges unnamed, and the row saved.
+Roadmap:   Executive statements -> live and tuned
+Decisions: Public praise by name, private accountability — the split is now enforced in the prompt.
+Blockers:  none
+Next:      Cambridge chef re-uploads Count Amounts for P13 W1-W3; watch next week's first fully-automatic generation.
+
 [2026-08-24] Merged: ingest visibility + two-audience summaries live
 Shipped:   PR #61 merged to main (4f93c74); Vercel production deployment of that commit verified READY. Live now: chef variance-store confirmations, HQ Data completeness panel, Internal Executive Summary (exec-only) + Team Summary (export-only), auto-generation at 16/16, closing statement removed.
 Roadmap:   Executive statements -> live; Menu variance reliability -> live (Cambridge re-upload still pending)
