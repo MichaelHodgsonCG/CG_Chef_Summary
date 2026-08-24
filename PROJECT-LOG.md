@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-24] Merged: ingest visibility + two-audience summaries live
+Shipped:   PR #61 merged to main (4f93c74); Vercel production deployment of that commit verified READY. Live now: chef variance-store confirmations, HQ Data completeness panel, Internal Executive Summary (exec-only) + Team Summary (export-only), auto-generation at 16/16, closing statement removed.
+Roadmap:   Executive statements -> live; Menu variance reliability -> live (Cambridge re-upload still pending)
+Decisions: none
+Blockers:  none
+Next:      Michael reviews both W3 summaries in the live UI; Cambridge chef re-uploads Count Amounts for P13 W1-W3 to backfill and surface their store error.
+
 [2026-08-24] Two-audience summaries: internal executive + shared team version
 Shipped:   The candid good/bad/ugly read is renamed Internal Executive Summary (badged "executive team only — not included in the export"). New team_summary column + second AI pass writes the softer Team Summary for all chefs/managers: wins credited by name with numbers, challenges framed as shared priorities, no watchlist/count-error/data-gap/contradiction content. The exported report now carries ONLY the team version. Both generate together (auto on 16/16 or Regenerate Summaries). Live-verified on P13 W3: both saved (internal 2,187 chars, team 1,390) and the tones separate cleanly.
 Roadmap:   Executive statements -> complete (two-audience; pending Michael's read + merge)
