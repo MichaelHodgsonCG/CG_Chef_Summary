@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-24] Opening statement rebuilt: auto-generates from full consolidated read
+Shipped:   Root cause of "AI disabled": generate-executive-statements was never deployed and its repo copy queried pre-rename tables. Rebuilt + deployed: opening statement auto-generates when all 16 locations have filed (triggered by the last chef's finish and by dashboard open; manual Regenerate button kept), built from every location's numbers/notes, usage variance compared by concept (systemic vs concentrated), and deterministic findings — persistent item offenders (trailing 4 wks), count-error suspects, execution gaps in dollars, WoW swings, data gaps/ingest failures — structured as The Good / The Bad / The Ugly / Watchlist with narrative-vs-data contradiction call-outs. Closing statement removed from dashboard + export. Also found and fixed executive-report row duplication (loader re-inserted on every dashboard open once maybeSingle failed on duplicates: 689 rows for 23 weeks → deduped, unique week constraint added, writers upsert). Live-verified on P13 W3: statement generated and saved, repeat auto call skips.
+Roadmap:   Executive statements -> complete (pending Michael's read of the live W3 statement)
+Decisions: Statement saved server-side so auto triggers from chef finish and dashboard land in one place; closing statement retired per Michael.
+Blockers:  none
+Next:      Michael to review the generated P13 W3 statement on the dashboard and tune tone/length preferences; then merge.
+
 [2026-08-24] Cambridge variance gap: diagnosed + made ingest failures visible
 Shipped:   Diagnosis: the consolidated menu report's per-item data comes solely from each chef's weekly Count Amounts upload; Cambridge's store has failed/skipped silently since WE 2026-07-26 (three weeks of filed summaries, zero variance rows) and Burlington's W1 stored 1 row — the code swallowed store errors. Fix (commit ba1f73d): chefs now see an explicit "N items stored" confirmation or a failure banner with the real error on the usage step; a missing location/week context reports instead of silently skipping; every attempt is recorded in new weekly_summary_ingest_log (migration applied); the Usage Variance by Concept page shows a Data completeness panel naming each location/week with no stored items plus logged failures. Typecheck/lint/build deltas clean vs baseline.
 Roadmap:   Menu variance data reliability -> in progress (visibility shipped; Cambridge backfill pending re-upload)
