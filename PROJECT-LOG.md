@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-24] Two-audience summaries: internal executive + shared team version
+Shipped:   The candid good/bad/ugly read is renamed Internal Executive Summary (badged "executive team only — not included in the export"). New team_summary column + second AI pass writes the softer Team Summary for all chefs/managers: wins credited by name with numbers, challenges framed as shared priorities, no watchlist/count-error/data-gap/contradiction content. The exported report now carries ONLY the team version. Both generate together (auto on 16/16 or Regenerate Summaries). Live-verified on P13 W3: both saved (internal 2,187 chars, team 1,390) and the tones separate cleanly.
+Roadmap:   Executive statements -> complete (two-audience; pending Michael's read + merge)
+Decisions: Team version may name locations for factual results but never for discipline failures or reporting contradictions — that split is in the prompt per Michael's direction.
+Blockers:  none
+Next:      Michael to read both W3 versions on the dashboard, then merge (auto-trigger + export swap need the deploy).
+
 [2026-08-24] Opening statement rebuilt: auto-generates from full consolidated read
 Shipped:   Root cause of "AI disabled": generate-executive-statements was never deployed and its repo copy queried pre-rename tables. Rebuilt + deployed: opening statement auto-generates when all 16 locations have filed (triggered by the last chef's finish and by dashboard open; manual Regenerate button kept), built from every location's numbers/notes, usage variance compared by concept (systemic vs concentrated), and deterministic findings — persistent item offenders (trailing 4 wks), count-error suspects, execution gaps in dollars, WoW swings, data gaps/ingest failures — structured as The Good / The Bad / The Ugly / Watchlist with narrative-vs-data contradiction call-outs. Closing statement removed from dashboard + export. Also found and fixed executive-report row duplication (loader re-inserted on every dashboard open once maybeSingle failed on duplicates: 689 rows for 23 weeks → deduped, unique week constraint added, writers upsert). Live-verified on P13 W3: statement generated and saved, repeat auto call skips.
 Roadmap:   Executive statements -> complete (pending Michael's read of the live W3 statement)
