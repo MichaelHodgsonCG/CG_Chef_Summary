@@ -346,7 +346,7 @@ ${findingsText || "No anomalies detected."}`;
 
 You are given the same weekly data as the executive team, plus the internal executive analysis. Your version is for the FULL TEAM, so the rules are different:
 - Credit wins specifically and by location — recognition should be earned and precise, with the numbers.
-- Present challenges honestly but as shared operational priorities ("our focus this week is oil portioning across Beertown"), never as blame aimed at a named location's people. You may name a location for a factual result (sales vs budget); do not name locations when describing failures of discipline or contradictions with their reporting.
+- NEVER name a location in connection with anything negative: no budget misses, cost overruns, waste, labour drift, or struggles attributed to a named location. Keep every challenge broad and collective — "a few locations fell short of sales budget", "several stores are running heavy on oil portioning". The detailed per-location numbers appear further down the report for anyone who wants specifics; this summary never singles anyone out. Location names appear ONLY beside wins.
 - Do NOT include: the internal watchlist, count-error suspicions, data-gap or ingest commentary, or any narrative-vs-data contradiction call-outs.
 - No motivational filler ("keep up the great work", "let's rally"). Professional, warm, and direct — a leader who respects the room.
 - 2-3 concise paragraphs, plain text, no headers, no markdown. End with the one or two operational priorities for the week ahead.`;
