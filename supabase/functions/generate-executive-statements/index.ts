@@ -338,11 +338,49 @@ ${findingsText || "No anomalies detected."}`;
       });
     }
 
+    // Second pass: the TEAM SUMMARY — the version that ships on the exported
+    // report to every chef and manager. Same facts, different audience: it
+    // celebrates by name, frames problems as shared priorities without
+    // singling anyone out, and carries none of the internal watchlist.
+    const teamPrompt = `You are writing the weekly summary that opens the Weekly Culinary Summary report distributed to every Executive Chef and manager in a multi-unit Canadian restaurant group. Use Canadian spelling (Labour, Flavour, Honour).
+
+You are given the same weekly data as the executive team, plus the internal executive analysis. Your version is for the FULL TEAM, so the rules are different:
+- Credit wins specifically and by location — recognition should be earned and precise, with the numbers.
+- Present challenges honestly but as shared operational priorities ("our focus this week is oil portioning across Beertown"), never as blame aimed at a named location's people. You may name a location for a factual result (sales vs budget); do not name locations when describing failures of discipline or contradictions with their reporting.
+- Do NOT include: the internal watchlist, count-error suspicions, data-gap or ingest commentary, or any narrative-vs-data contradiction call-outs.
+- No motivational filler ("keep up the great work", "let's rally"). Professional, warm, and direct — a leader who respects the room.
+- 2-3 concise paragraphs, plain text, no headers, no markdown. End with the one or two operational priorities for the week ahead.`;
+
+    let teamSummary = "";
+    const teamResp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: teamPrompt },
+          { role: "user", content: `${userContent}\n\n[INTERNAL EXECUTIVE ANALYSIS — context only, do not quote or reveal]\n${opening}` },
+        ],
+        max_tokens: 550,
+        temperature: 0.4,
+      }),
+    });
+    if (teamResp.ok) {
+      const teamData = await teamResp.json();
+      teamSummary = teamData.choices?.[0]?.message?.content?.trim() || "";
+    } else {
+      console.error("OpenAI error (team summary):", await teamResp.text());
+    }
+
     // Save server-side so auto triggers from any surface land in one place.
     if (reportRow?.id) {
       let update = supabase
         .from("weekly_summary_executive_reports")
-        .update({ opening_statement: opening, updated_at: new Date().toISOString() })
+        .update({
+          opening_statement: opening,
+          ...(teamSummary ? { team_summary: teamSummary } : {}),
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", reportRow.id);
       // Auto mode never overwrites a statement that appeared since we checked.
       if (mode === "auto") update = update.eq("opening_statement", reportRow.opening_statement ?? "");
@@ -353,11 +391,12 @@ ${findingsText || "No anomalies detected."}`;
         period_number: period,
         week_number: week,
         opening_statement: opening,
+        team_summary: teamSummary,
         leadership_notes: notes,
       }, { onConflict: "fiscal_year,period_number,week_number" });
     }
 
-    return new Response(JSON.stringify({ opening, filed, total }), {
+    return new Response(JSON.stringify({ opening, teamSummary, filed, total }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {

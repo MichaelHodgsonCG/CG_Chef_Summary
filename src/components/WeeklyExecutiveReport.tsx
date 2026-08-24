@@ -17,6 +17,7 @@ type WeeklyReport = {
   consolidated_metrics: any;
   leadership_notes: string;
   opening_statement: string;
+  team_summary: string;
   closing_statement: string;
   status: 'draft' | 'final';
   created_at: string;
@@ -291,7 +292,9 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
 
       const result = await response.json();
       if (result.opening) {
-        setReport((prev) => (prev ? { ...prev, opening_statement: result.opening } : prev));
+        setReport((prev) => (prev
+          ? { ...prev, opening_statement: result.opening, team_summary: result.teamSummary || prev.team_summary }
+          : prev));
         showMessage('success', mode === 'auto'
           ? 'All locations filed — opening statement generated'
           : 'Opening statement generated');
@@ -773,9 +776,11 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
           </div>
         </div>`).join('');
 
-      const openingHtml = report?.opening_statement
+      // Only the team summary ships on the export — the internal executive
+      // summary (candid good/bad/ugly) stays on this dashboard.
+      const openingHtml = report?.team_summary
         ? `<div style="margin-bottom: 28px;">
-            <div style="font-size: 14px; color: #1e293b; line-height: 1.75; white-space: pre-wrap;">${report.opening_statement}</div>
+            <div style="font-size: 14px; color: #1e293b; line-height: 1.75; white-space: pre-wrap;">${report.team_summary}</div>
           </div>`
         : '';
 
@@ -910,7 +915,7 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                {report.opening_statement ? 'Regenerate Opening' : 'Generate Opening'}
+                {report.opening_statement ? 'Regenerate Summaries' : 'Generate Summaries'}
               </>
             )}
           </button>
@@ -926,10 +931,15 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
       </div>
 
       <div className="space-y-6">
-          {/* Opening Statement */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-semibold text-slate-800">Opening Statement</h2>
+          {/* Internal Executive Summary — the candid read, never exported */}
+          <div className="bg-white rounded-lg border border-amber-300 p-6">
+            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+              <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+                Internal Executive Summary
+                <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-300 rounded px-1.5 py-0.5">
+                  Executive team only — not included in the export
+                </span>
+              </h2>
               {!report.opening_statement && completeness && (
                 <span className="text-xs text-slate-400 italic">
                   {completeness.filed >= completeness.total && completeness.total > 0
@@ -942,7 +952,26 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
               <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{report.opening_statement}</div>
             ) : (
               <div className="text-sm text-slate-400 italic py-4 text-center">
-                {generatingStatements ? 'Reading all packages and usage data…' : 'No opening statement generated yet'}
+                {generatingStatements ? 'Reading all packages and usage data…' : 'No summary generated yet'}
+              </div>
+            )}
+          </div>
+
+          {/* Team Summary — the version that ships on the export */}
+          <div className="bg-white rounded-lg border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+              <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+                Team Summary
+                <span className="text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-600 border border-slate-300 rounded px-1.5 py-0.5">
+                  Shared with all chefs &amp; managers on the export
+                </span>
+              </h2>
+            </div>
+            {report.team_summary ? (
+              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{report.team_summary}</div>
+            ) : (
+              <div className="text-sm text-slate-400 italic py-4 text-center">
+                {generatingStatements ? 'Writing the team version…' : 'Generates together with the executive summary'}
               </div>
             )}
           </div>
