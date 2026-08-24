@@ -822,6 +822,26 @@ export function WeeklyChefSummary({ locationId, locationName, summaryId }: Weekl
   const handleGuideFinish = async () => {
     setShowGuide(false);
     await handleSave();
+
+    // If this was the last location to file for the week, the executive
+    // opening statement auto-generates now (server-side; skips unless every
+    // reporting location has filed and no statement exists yet). Fire and
+    // forget — the chef's flow never waits on it.
+    fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-executive-statements`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        fiscalYear: formData.fiscal_year,
+        period: formData.period_number,
+        week: formData.week_number,
+        mode: 'auto',
+      }),
+    }).catch(() => {
+      // Best-effort: the executive dashboard also auto-generates on open.
+    });
   };
 
   // Closing the guide part-way also saves whatever has been entered so far,

@@ -938,6 +938,53 @@ function parseCountAmountsReport(csvText: string): CountAmountsRow[] {
   return out;
 }
 
+// Supabase/PostgREST errors are plain objects, not Error instances; surface
+// their real message so a failed store is diagnosable from the chef's screen.
+function describeStoreError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === 'object') {
+    const e = error as { message?: string; details?: string; code?: string };
+    const parts = [e.message, e.details, e.code && `(${e.code})`].filter(Boolean);
+    if (parts.length) return parts.join(' — ');
+  }
+  return 'Unknown error storing item variances.';
+}
+
+// Record every variance-store attempt so HQ can see gaps the same week —
+// this store used to fail silently (a location could drop off the
+// consolidated menu report for weeks with nobody the wiser). Best-effort:
+// the log itself must never block the chef's flow.
+async function logVarianceIngest(
+  locationId: string,
+  fiscalYear: number,
+  periodNumber: number,
+  weekNumber: number,
+  weekEndingDate: string | null,
+  status: 'stored' | 'failed',
+  itemCount: number,
+  errorText: string | null
+): Promise<void> {
+  try {
+    await supabase.from('weekly_summary_ingest_log').insert({
+      location_id: locationId,
+      fiscal_year: fiscalYear,
+      period_number: periodNumber,
+      week_number: weekNumber,
+      week_ending_date: weekEndingDate,
+      kind: 'item_variances',
+      status,
+      item_count: itemCount,
+      error_text: errorText,
+    });
+  } catch (e) {
+    console.error('Failed to write ingest log', e);
+  }
+}
+
+type UsageStoreStatus =
+  | { status: 'stored'; count: number }
+  | { status: 'failed'; message: string };
+
 // Persist a location/week's full item variances for the consolidated report.
 // Replace-on-reupload, then prune this location's rows older than 13 weeks.
 async function storeCountAmountsVariances(
@@ -1309,6 +1356,7 @@ export function GuidedWeeklyPackage({
   });
   const [purchasesError, setPurchasesError] = useState('');
   const [usageWeekFile, setUsageWeekFile] = useState<File | null>(null);
+  const [usageStoreStatus, setUsageStoreStatus] = useState<UsageStoreStatus | null>(null);
   const [usageWeekRows, setUsageWeekRows] = useState<UsageReportRow[] | null>(null);
   const [usageWeekError, setUsageWeekError] = useState('');
   const [usageFourWeekFile, setUsageFourWeekFile] = useState<File | null>(null);
@@ -1736,7 +1784,17 @@ export function GuidedWeeklyPackage({
       }
 
       // ...and persist the complete item set for the consolidated menu report.
-      if (locationId && fiscalYear && periodNumber && weekNumber) {
+      // The outcome is shown to the chef and logged for HQ — this store used
+      // to fail silently, which could leave a location's column empty on the
+      // consolidated report for weeks with nobody the wiser.
+      setUsageStoreStatus(null);
+      if (!locationId || !fiscalYear || !periodNumber || !weekNumber) {
+        setUsageStoreStatus({
+          status: 'failed',
+          message: 'Missing location/week context — items were NOT stored for the consolidated report.',
+        });
+      } else {
+        let weekEndingDate: string | null = null;
         try {
           const { data: cal } = await supabase
             .from('fiscal_calendar')
@@ -1745,10 +1803,15 @@ export function GuidedWeeklyPackage({
             .eq('period', periodNumber)
             .eq('week', weekNumber)
             .maybeSingle();
-          const weekEndingDate = (cal?.end_date as string) ?? null;
+          weekEndingDate = (cal?.end_date as string) ?? null;
           await storeCountAmountsVariances(locationId, fiscalYear, periodNumber, weekNumber, weekEndingDate, items);
+          setUsageStoreStatus({ status: 'stored', count: items.length });
+          await logVarianceIngest(locationId, fiscalYear, periodNumber, weekNumber, weekEndingDate, 'stored', items.length, null);
         } catch (e) {
+          const message = describeStoreError(e);
           console.error('Failed to store item variances', e);
+          setUsageStoreStatus({ status: 'failed', message });
+          await logVarianceIngest(locationId, fiscalYear, periodNumber, weekNumber, weekEndingDate, 'failed', items.length, message);
         }
       }
     } catch (err) {
@@ -2147,6 +2210,7 @@ export function GuidedWeeklyPackage({
         weekRows={usageWeekRows}
         weekError={usageWeekError}
         onWeekFileSelect={handleUsageWeekFileSelect}
+        storeStatus={usageStoreStatus}
         fourWeekFile={usageFourWeekFile}
         fourWeekRows={usageFourWeekRows}
         fourWeekError={usageFourWeekError}
@@ -4470,6 +4534,7 @@ function GuidedUsageReviewStep({
   weekRows,
   weekError,
   onWeekFileSelect,
+  storeStatus,
   fourWeekFile,
   fourWeekRows,
   fourWeekError,
@@ -4483,6 +4548,7 @@ function GuidedUsageReviewStep({
   weekRows: UsageReportRow[] | null;
   weekError: string;
   onWeekFileSelect: (file: File) => void;
+  storeStatus?: UsageStoreStatus | null;
   fourWeekFile: File | null;
   fourWeekRows: UsageReportRow[] | null;
   fourWeekError: string;
@@ -4574,6 +4640,24 @@ function GuidedUsageReviewStep({
         error={weekError}
         onFileSelect={onWeekFileSelect}
       />
+
+      {storeStatus?.status === 'stored' && (
+        <div className="mt-3 flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+          <CheckCircle2 className="w-5 h-5 shrink-0" />
+          <span className="text-sm font-medium">
+            {storeStatus.count} items stored for the consolidated menu report.
+          </span>
+        </div>
+      )}
+      {storeStatus?.status === 'failed' && (
+        <div className="mt-3 flex items-start gap-2 text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+          <span className="text-sm font-medium">
+            Your items were NOT stored for the consolidated menu report — your restaurant's column will be blank.
+            Try uploading again; if this keeps happening, tell HQ. ({storeStatus.message})
+          </span>
+        </div>
+      )}
 
       <UsageReportUploadZone
         title="2. Upload Trailing 4-Week Report (Top 25 / Bottom 10 — Current Week + 3 Previous)"

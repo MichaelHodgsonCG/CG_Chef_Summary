@@ -18,6 +18,14 @@ type VarianceRow = {
   location_id: string;
   item_name: string;
   net_variance_amount: number | null;
+  week_ending_date: string;
+};
+
+type IngestFailure = {
+  location_id: string;
+  week_ending_date: string;
+  error_text: string | null;
+  created_at: string;
 };
 
 type AggItem = {
@@ -39,6 +47,7 @@ export function ConsolidatedItemVariance() {
   const [weeks, setWeeks] = useState<WeekOption[]>([]);
   const [selectedWeeks, setSelectedWeeks] = useState<string[]>([]);
   const [rows, setRows] = useState<VarianceRow[]>([]);
+  const [ingestFailures, setIngestFailures] = useState<IngestFailure[]>([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // 'concept' = consolidated ranking across the menu; 'reasons' = the reasons
@@ -105,7 +114,7 @@ export function ConsolidatedItemVariance() {
       for (let from = 0; ; from += PAGE) {
         const { data } = await supabase
           .from('weekly_summary_item_variances')
-          .select('location_id, item_name, net_variance_amount')
+          .select('location_id, item_name, net_variance_amount, week_ending_date')
           .in('location_id', ids)
           .in('week_ending_date', selectedWeeks)
           .range(from, from + PAGE - 1);
@@ -114,6 +123,19 @@ export function ConsolidatedItemVariance() {
         if (data.length < PAGE) break;
       }
       setRows(all);
+
+      // Chef-side store failures for these weeks, so a location's missing
+      // column comes with the reason instead of being a silent blank.
+      const { data: failData } = await supabase
+        .from('weekly_summary_ingest_log')
+        .select('location_id, week_ending_date, error_text, created_at')
+        .in('location_id', ids)
+        .in('week_ending_date', selectedWeeks)
+        .eq('kind', 'item_variances')
+        .eq('status', 'failed')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      setIngestFailures((failData as IngestFailure[]) || []);
     } finally {
       setLoading(false);
     }
@@ -311,6 +333,19 @@ export function ConsolidatedItemVariance() {
 
   const fullCoverage = reportingCount >= locations.length && locations.length > 0;
 
+  // Per-location gaps: which selected weeks have no stored items for each
+  // location, so a blank column is named instead of silently absorbed.
+  const coverageGaps = useMemo(() => {
+    if (selectedWeeks.length === 0 || locations.length === 0) return [];
+    const present = new Set(rows.map((r) => `${r.location_id}|${r.week_ending_date}`));
+    return locations
+      .map((l) => ({
+        name: l.name,
+        weeks: selectedWeeks.filter((w) => !present.has(`${l.id}|${w}`)).sort(),
+      }))
+      .filter((g) => g.weeks.length > 0);
+  }, [rows, locations, selectedWeeks]);
+
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -429,6 +464,31 @@ export function ConsolidatedItemVariance() {
             {!fullCoverage && <AlertTriangle className="w-3.5 h-3.5" />}
             {reportingCount} of {locations.length} locations have uploaded for the selected week{selectedWeeks.length > 1 ? 's' : ''}
             {!fullCoverage && ' — ranking will fill in as the rest upload.'}
+          </div>
+        )}
+
+        {(coverageGaps.length > 0 || ingestFailures.length > 0) && (
+          <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1.5">
+            <p className="font-semibold text-amber-800 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" /> Data completeness
+            </p>
+            {coverageGaps.map((g) => (
+              <p key={g.name} className="text-amber-800">
+                <span className="font-medium">{g.name}</span>: no items stored for{' '}
+                {g.weeks.map((w) => `WE ${w}`).join(', ')} — their column is blank for those weeks.
+              </p>
+            ))}
+            {ingestFailures.map((f) => (
+              <p key={`${f.location_id}-${f.created_at}`} className="text-red-700">
+                <span className="font-medium">{locName.get(f.location_id) ?? 'Unknown location'}</span>: store FAILED
+                for WE {f.week_ending_date} ({new Date(f.created_at).toLocaleString()})
+                {f.error_text ? ` — ${f.error_text}` : ''}
+              </p>
+            ))}
+            <p className="text-amber-700/80">
+              Fix: the chef re-opens the guided package's usage step and re-uploads the Count Amounts report —
+              they now see a stored/failed confirmation on that screen.
+            </p>
           </div>
         )}
       </div>

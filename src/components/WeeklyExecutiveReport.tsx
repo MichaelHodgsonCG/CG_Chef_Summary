@@ -17,6 +17,7 @@ type WeeklyReport = {
   consolidated_metrics: any;
   leadership_notes: string;
   opening_statement: string;
+  team_summary: string;
   closing_statement: string;
   status: 'draft' | 'final';
   created_at: string;
@@ -46,6 +47,9 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
   const [generating, setGenerating] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [generatingStatements, setGeneratingStatements] = useState(false);
+  const [completeness, setCompleteness] = useState<{ filed: number; total: number } | null>(null);
+  // One auto-generation attempt per selected week, so a failed call doesn't loop.
+  const autoOpeningTriedRef = useRef<string | null>(null);
 
   const isUsingProps = !!(propFiscalYear && propPeriod && propWeek);
 
@@ -141,15 +145,19 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
       setReport(existingReport);
     } else {
       const metrics = await calculateConsolidatedMetricsRef.current();
+      // Upsert against the week's unique key: concurrent loads (or React's
+      // double-mount) previously each inserted a fresh row, and once
+      // duplicates existed maybeSingle() failed forever, inserting more rows
+      // on every dashboard open (29 rows piled up for one week).
       const { data: newReport, error } = await supabase
         .from('weekly_summary_executive_reports')
-        .insert({
+        .upsert({
           fiscal_year: currentPeriod.fiscal_year,
           period_number: currentPeriod.period,
           week_number: currentPeriod.week,
           consolidated_metrics: metrics,
           status: 'draft'
-        })
+        }, { onConflict: 'fiscal_year,period_number,week_number' })
         .select()
         .single();
 
@@ -157,6 +165,22 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
         setReport(newReport);
       }
     }
+
+    // Filing completeness drives the auto-generated opening statement.
+    const [{ count: totalCount }, { count: filedCount }] = await Promise.all([
+      supabase
+        .from('locations')
+        .select('id', { count: 'exact', head: true })
+        .eq('exclude_from_reporting', false),
+      supabase
+        .from('weekly_summary_chef_summary')
+        .select('id, locations!inner(exclude_from_reporting)', { count: 'exact', head: true })
+        .eq('fiscal_year', currentPeriod.fiscal_year)
+        .eq('period_number', currentPeriod.period)
+        .eq('week_number', currentPeriod.week)
+        .eq('locations.exclude_from_reporting', false),
+    ]);
+    setCompleteness({ filed: filedCount ?? 0, total: totalCount ?? 0 });
 
     setLoading(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -234,7 +258,11 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
     }
   };
 
-  const generateStatements = async () => {
+  // Generate (or regenerate) the opening statement. The edge function does the
+  // consolidated read — all chef packages, usage variance by concept, and the
+  // computed anomaly findings — and saves the result server-side, so the auto
+  // trigger from a chef's finish and this dashboard land in the same place.
+  const generateOpening = async (mode: 'auto' | 'manual') => {
     if (!report || !currentPeriod) return;
 
     setGeneratingStatements(true);
@@ -252,38 +280,46 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
             fiscalYear: currentPeriod.fiscal_year,
             period: currentPeriod.period,
             week: currentPeriod.week,
-            leadershipNotes: report.leadership_notes || ''
+            leadershipNotes: report.leadership_notes || '',
+            mode
           })
         }
       );
 
       if (!response.ok) {
-        throw new Error('Failed to generate statements');
+        throw new Error('Failed to generate statement');
       }
 
-      const { opening, closing } = await response.json();
-
-      const updates: Partial<WeeklyReport> = {};
-      if (opening) updates.opening_statement = opening;
-      if (closing) updates.closing_statement = closing;
-
-      if (Object.keys(updates).length > 0) {
-        const { error } = await supabase
-          .from('weekly_summary_executive_reports')
-          .update({ ...updates, updated_at: new Date().toISOString() })
-          .eq('id', report.id);
-
-        if (error) throw error;
-        setReport({ ...report, ...updates });
-        showMessage('success', 'Opening and closing statements generated');
+      const result = await response.json();
+      if (result.opening) {
+        setReport((prev) => (prev
+          ? { ...prev, opening_statement: result.opening, team_summary: result.teamSummary || prev.team_summary }
+          : prev));
+        showMessage('success', mode === 'auto'
+          ? 'All locations filed — opening statement generated'
+          : 'Opening statement generated');
       }
     } catch (error) {
-      console.error('Error generating statements:', error);
-      showMessage('error', 'Failed to generate statements');
+      console.error('Error generating opening statement:', error);
+      if (mode === 'manual') showMessage('error', 'Failed to generate opening statement');
     } finally {
       setGeneratingStatements(false);
     }
   };
+
+  // Auto-populate: once every reporting location has filed and no statement
+  // exists for the week, generate without a click. The button stays for
+  // regeneration whenever leadership wants an updated read.
+  useEffect(() => {
+    if (!report || !currentPeriod || !completeness) return;
+    const key = `${currentPeriod.fiscal_year}-${currentPeriod.period}-${currentPeriod.week}`;
+    if (autoOpeningTriedRef.current === key) return;
+    if (report.opening_statement?.trim()) return;
+    if (completeness.total === 0 || completeness.filed < completeness.total) return;
+    autoOpeningTriedRef.current = key;
+    generateOpening('auto');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report, completeness, currentPeriod?.fiscal_year, currentPeriod?.period, currentPeriod?.week]);
 
   const exportReport = async () => {
     if (!currentPeriod) return;
@@ -740,15 +776,11 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
           </div>
         </div>`).join('');
 
-      const openingHtml = report?.opening_statement
+      // Only the team summary ships on the export — the internal executive
+      // summary (candid good/bad/ugly) stays on this dashboard.
+      const openingHtml = report?.team_summary
         ? `<div style="margin-bottom: 28px;">
-            <div style="font-size: 14px; color: #1e293b; line-height: 1.75; white-space: pre-wrap;">${report.opening_statement}</div>
-          </div>`
-        : '';
-
-      const closingHtml = report?.closing_statement
-        ? `<div style="margin-top: 28px;">
-            <div style="font-size: 14px; color: #1e293b; line-height: 1.75; white-space: pre-wrap;">${report.closing_statement}</div>
+            <div style="font-size: 14px; color: #1e293b; line-height: 1.75; white-space: pre-wrap;">${report.team_summary}</div>
           </div>`
         : '';
 
@@ -775,7 +807,6 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
   <h2 style="font-size: 16px; font-weight: 700; color: #1e293b; margin: 28px 0 16px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Restaurant Performance</h2>
   ${restaurants.length > 0 ? restaurantPerformanceHtml() : '<p style="color: #64748b; font-size: 13px;">No data available.</p>'}
 
-  ${closingHtml}
 </body>
 </html>`;
 
@@ -872,7 +903,7 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
           )}
 
           <button
-            onClick={generateStatements}
+            onClick={() => generateOpening('manual')}
             disabled={generatingStatements}
             className="flex items-center gap-2 px-4 py-2 bg-cg-accent text-white rounded-lg hover:bg-cg-accentHover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
@@ -884,7 +915,7 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                Generate Statements
+                {report.opening_statement ? 'Regenerate Summaries' : 'Generate Summaries'}
               </>
             )}
           </button>
@@ -900,18 +931,48 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
       </div>
 
       <div className="space-y-6">
-          {/* Opening Statement */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-semibold text-slate-800">Opening Statement</h2>
-              {!report.opening_statement && (
-                <span className="text-xs text-slate-400 italic">Generate using the button above</span>
+          {/* Internal Executive Summary — the candid read, never exported */}
+          <div className="bg-white rounded-lg border border-amber-300 p-6">
+            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+              <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+                Internal Executive Summary
+                <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-300 rounded px-1.5 py-0.5">
+                  Executive team only — not included in the export
+                </span>
+              </h2>
+              {!report.opening_statement && completeness && (
+                <span className="text-xs text-slate-400 italic">
+                  {completeness.filed >= completeness.total && completeness.total > 0
+                    ? 'All locations filed — generating…'
+                    : `Auto-generates when all ${completeness.total} locations have filed — ${completeness.filed} of ${completeness.total} so far`}
+                </span>
               )}
             </div>
             {report.opening_statement ? (
               <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{report.opening_statement}</div>
             ) : (
-              <div className="text-sm text-slate-400 italic py-4 text-center">No opening statement generated yet</div>
+              <div className="text-sm text-slate-400 italic py-4 text-center">
+                {generatingStatements ? 'Reading all packages and usage data…' : 'No summary generated yet'}
+              </div>
+            )}
+          </div>
+
+          {/* Team Summary — the version that ships on the export */}
+          <div className="bg-white rounded-lg border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+              <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2">
+                Team Summary
+                <span className="text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-600 border border-slate-300 rounded px-1.5 py-0.5">
+                  Shared with all chefs &amp; managers on the export
+                </span>
+              </h2>
+            </div>
+            {report.team_summary ? (
+              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{report.team_summary}</div>
+            ) : (
+              <div className="text-sm text-slate-400 italic py-4 text-center">
+                {generatingStatements ? 'Writing the team version…' : 'Generates together with the executive summary'}
+              </div>
             )}
           </div>
 
@@ -929,21 +990,6 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
           </div>
 
           <RestaurantMetricsList fiscalYear={currentPeriod!.fiscal_year} period={currentPeriod!.period} week={currentPeriod!.week} />
-
-          {/* Closing Statement */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-semibold text-slate-800">Closing Statement</h2>
-              {!report.closing_statement && (
-                <span className="text-xs text-slate-400 italic">Generate using the button above</span>
-              )}
-            </div>
-            {report.closing_statement ? (
-              <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{report.closing_statement}</div>
-            ) : (
-              <div className="text-sm text-slate-400 italic py-4 text-center">No closing statement generated yet</div>
-            )}
-          </div>
         </div>
     </div>
   );
