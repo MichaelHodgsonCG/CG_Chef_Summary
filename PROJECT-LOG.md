@@ -1,5 +1,13 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-24] Cambridge variance gap: diagnosed + made ingest failures visible
+Shipped:   Diagnosis: the consolidated menu report's per-item data comes solely from each chef's weekly Count Amounts upload; Cambridge's store has failed/skipped silently since WE 2026-07-26 (three weeks of filed summaries, zero variance rows) and Burlington's W1 stored 1 row — the code swallowed store errors. Fix (commit ba1f73d): chefs now see an explicit "N items stored" confirmation or a failure banner with the real error on the usage step; a missing location/week context reports instead of silently skipping; every attempt is recorded in new weekly_summary_ingest_log (migration applied); the Usage Variance by Concept page shows a Data completeness panel naming each location/week with no stored items plus logged failures. Typecheck/lint/build deltas clean vs baseline.
+Roadmap:   Menu variance data reliability -> in progress (visibility shipped; Cambridge backfill pending re-upload)
+Decisions: none
+Blockers:  Root cause of Cambridge's specific failure unknown until their chef re-uploads and the error surfaces.
+Next:      Merge; then have the Cambridge chef re-open the usage step and re-upload Count Amounts for P13 W1–W3 — the banner/log will show the exact error and backfill the print sheet.
+Note:      Correction — yesterday's diagnosis message claimed this was already filed to the bus; it was not. Filed now with this entry.
+
 [2026-08-23] Weekly Package 2.0 beta live: merged, deployed, Guelph piloting
 Shipped:   PR #60 merged to main (c59535a); Vercel production deployment of that commit verified READY. Beta flag guided_package_v2 enabled for Beertown Guelph (verified by read-back — the only flagged location). From this week's filing, Guelph's chef sees the week recap and the sales/discounts prefills; every other location is unchanged.
 Roadmap:   Chef workflow auto-prefill -> beta live at one pilot location
