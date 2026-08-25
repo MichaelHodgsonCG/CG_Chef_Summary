@@ -8,6 +8,7 @@ import { fetchLabourPlBaseline, fetchSalesPlBaseline, fetchFoodCostPlBaseline, g
 import { NextPeriodFcap } from '../lib/chefSummaryExport';
 import { buildChefSummaryReport } from '../lib/chefSummaryReport';
 import { ChefWeekPack, fetchChefWeekPack, isBetaFeatureEnabled, GUIDED_PACKAGE_V2 } from '../lib/weekPack';
+import { itemMatchKey } from '../lib/itemMatching';
 
 type GuidedStep = 'start' | 'sales' | 'transfers' | 'overtime' | 'review' | 'discounts' | 'speedOfService' | 'salesRecap' | 'cogs' | 'purchases' | 'usageReview' | 'finalFoodCost' | 'finalFoodCostRecap' | 'nextPeriodFcap' | 'team' | 'facilities' | 'features' | 'audit' | 'recap';
 
@@ -1048,7 +1049,15 @@ function buildUsageFlaggedItems(
   weekRows: UsageReportRow[],
   fourWeekRows: UsageReportRow[]
 ): UsageFlaggedItem[] {
-  const fourWeekByName = new Map(fourWeekRows.map((row) => [row.itemName, row.varianceAmount]));
+  // Key on the suffix-stripped name and SUM variants: during an OC renumber
+  // the trailing 4-week report lists the old and new names side by side
+  // (e.g. "Bacon Sliced 22" for the early weeks, "Bacon Sliced 26" after),
+  // and their sum is the item's true 4-week variance.
+  const fourWeekByName = new Map<string, number>();
+  for (const row of fourWeekRows) {
+    const key = itemMatchKey(row.itemName);
+    fourWeekByName.set(key, (fourWeekByName.get(key) ?? 0) + row.varianceAmount);
+  }
 
   const underUsed = [...weekRows]
     .filter((row) => row.varianceAmount < 0)
@@ -1064,7 +1073,7 @@ function buildUsageFlaggedItems(
     itemName: row.itemName,
     direction,
     weekVariance: row.varianceAmount,
-    fourWeekVariance: fourWeekByName.has(row.itemName) ? fourWeekByName.get(row.itemName)! : null,
+    fourWeekVariance: fourWeekByName.has(itemMatchKey(row.itemName)) ? fourWeekByName.get(itemMatchKey(row.itemName))! : null,
     confirmed: false,
     comment: '',
   });
