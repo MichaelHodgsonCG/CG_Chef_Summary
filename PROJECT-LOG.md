@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-25] OC item renumber: match across suffix changes
+Shipped:   Reviewed the OC rename Michael flagged: not just 25→26 — every suffix (22/23/24/25) moved to 26 in the week of Aug 16-23, splitting item histories (105 confirmed splits, ~300 more coming as weeks upload). Fix: all matching/aggregation now keys on the suffix-stripped name, displaying the newest variant — consolidated report + print sheet, guided week-vs-4-week comparison (sums old+new variants), and the executive statement's persistence/concept analysis (deployed). No historical data rewritten; future renumbers handled automatically. Verified BTW Butter Unsalted reads as one continuous 22→26 series.
+Roadmap:   Menu variance data reliability -> item matching hardened
+Decisions: Normalize at comparison time instead of renaming history — a one-time rename would re-fragment weekly as the ~300 remaining items' new names appear, and would need redoing at the next renumber.
+Blockers:  none
+Next:      Merge (frontend matching needs the deploy; the statement function is already live).
+
 [2026-08-24] Team summary: no locations named beside negatives
 Shipped:   Team-summary prompt rule changed per Michael: location names appear only beside wins; all challenges stay broad and collective ("a few locations fell short..."), with per-location detail left to the report tables below. Deployed (server-side only, no frontend change) and W3 regenerated — verified the new team summary names Burlington/Bauer/Toronto for wins only, challenges unnamed, and the row saved.
 Roadmap:   Executive statements -> live and tuned
