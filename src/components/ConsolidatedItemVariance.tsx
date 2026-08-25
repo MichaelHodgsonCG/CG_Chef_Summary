@@ -113,12 +113,20 @@ export function ConsolidatedItemVariance() {
       const PAGE = 1000;
       const all: VarianceRow[] = [];
       for (let from = 0; ; from += PAGE) {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('weekly_summary_item_variances')
           .select('location_id, item_name, net_variance_amount, week_ending_date')
           .in('location_id', ids)
           .in('week_ending_date', selectedWeeks)
+          // Deterministic order is required for stable pagination: without it
+          // Postgres returns physical row order, which churns as chefs
+          // re-upload (delete+insert), and whole locations can fall through
+          // page boundaries — the report then under-counts real data.
+          .order('id')
           .range(from, from + PAGE - 1);
+        // A failed page must not read as end-of-data — that silently truncates
+        // the report to however many rows loaded before the error.
+        if (error) throw error;
         if (!data || data.length === 0) break;
         all.push(...(data as VarianceRow[]));
         if (data.length < PAGE) break;
