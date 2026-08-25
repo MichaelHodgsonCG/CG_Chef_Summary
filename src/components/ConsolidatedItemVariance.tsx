@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ChevronRight, Download, ListOrdered, AlertTriangle, Table, MessageSquareText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { itemMatchKey } from '../lib/itemMatching';
 import { UsageVarianceReport } from './UsageVarianceReport';
 
 type MenuLocation = { id: string; name: string; code: string };
@@ -148,17 +149,26 @@ export function ConsolidatedItemVariance() {
   }, [locations]);
 
   // Aggregate net variance per item across the menu's locations for the selected
-  // week(s); keep the per-location breakdown for the drill-down.
+  // week(s); keep the per-location breakdown for the drill-down. Items are
+  // grouped on the suffix-stripped name (OC renumbers suffixes — "Bacon
+  // Sliced 22" became "Bacon Sliced 26" — splitting one item's history into
+  // two names); the newest variant is the one displayed.
   const { over, under, reportingCount } = useMemo(() => {
     const byItem = new Map<string, AggItem>();
+    const displayWeek = new Map<string, string>();
     const reporting = new Set<string>();
     for (const r of rows) {
       const v = r.net_variance_amount || 0;
       reporting.add(r.location_id);
-      let agg = byItem.get(r.item_name);
+      const key = itemMatchKey(r.item_name);
+      let agg = byItem.get(key);
       if (!agg) {
         agg = { itemName: r.item_name, total: 0, byLocation: new Map() };
-        byItem.set(r.item_name, agg);
+        byItem.set(key, agg);
+        displayWeek.set(key, r.week_ending_date);
+      } else if (r.week_ending_date >= (displayWeek.get(key) ?? '')) {
+        agg.itemName = r.item_name;
+        displayWeek.set(key, r.week_ending_date);
       }
       agg.total += v;
       agg.byLocation.set(r.location_id, (agg.byLocation.get(r.location_id) || 0) + v);

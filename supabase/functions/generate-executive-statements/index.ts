@@ -30,6 +30,13 @@ const money = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
 const pct = (v: number) => `${v.toFixed(2)}%`;
 const num = (v: unknown) => Number(v) || 0;
 
+// OC renumbers item-name suffixes ("Bacon Sliced 22" -> "Bacon Sliced 26"),
+// splitting one item's history into two names. Aggregate and trend on the
+// suffix-stripped name so persistence detection survives the renumber.
+function itemBase(name: string): string {
+  return name.replace(/\s+\d{1,3}\s*$/, "").trim();
+}
+
 function conceptOf(loc: Loc): string {
   if (loc.menu) return loc.menu;
   if (["WC", "TBK", "SOLE"].includes(loc.code)) return "Trinity";
@@ -210,8 +217,9 @@ Deno.serve(async (req: Request) => {
       const concept = conceptOf(loc);
       const items = byConcept.get(concept) ?? new Map();
       byConcept.set(concept, items);
-      const agg = items.get(r.item_name) ?? { total: 0, byLoc: new Map() };
-      items.set(r.item_name, agg);
+      const base = itemBase(r.item_name);
+      const agg = items.get(base) ?? { total: 0, byLoc: new Map() };
+      items.set(base, agg);
       const v = num(r.net_variance_amount);
       agg.total += v;
       agg.byLoc.set(loc.code, (agg.byLoc.get(loc.code) || 0) + v);
@@ -241,7 +249,7 @@ Deno.serve(async (req: Request) => {
     for (const r of varRows) {
       const loc = locById.get(r.location_id);
       if (!loc) continue;
-      const key = `${loc.code}|${r.item_name}`;
+      const key = `${loc.code}|${itemBase(r.item_name)}`;
       const m = perLocItem.get(key) ?? new Map();
       perLocItem.set(key, m);
       m.set(r.week_ending_date, (m.get(r.week_ending_date) || 0) + num(r.net_variance_amount));
