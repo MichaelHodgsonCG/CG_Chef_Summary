@@ -44,11 +44,13 @@ function conceptOf(loc: Loc): string {
 }
 
 // PostgREST caps a response at 1,000 rows; a 4-week variance read is ~21k.
-async function pageAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null }>): Promise<T[]> {
+async function pageAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error?: unknown }>): Promise<T[]> {
   const PAGE = 1000;
   const all: T[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data } = await build(from, from + PAGE - 1);
+    const { data, error } = await build(from, from + PAGE - 1);
+    // A failed page must not read as end-of-data — that silently truncates.
+    if (error) throw error;
     if (!data || data.length === 0) break;
     all.push(...data);
     if (data.length < PAGE) break;
@@ -157,6 +159,8 @@ Deno.serve(async (req: Request) => {
         .select("location_id, item_name, net_variance_amount, week_ending_date")
         .in("location_id", locIds)
         .in("week_ending_date", trailingDates)
+        // Stable order so pagination never drops rows across page boundaries.
+        .order("id")
         .range(from, to)
     );
     const weekVarRows = varRows.filter((r) => r.week_ending_date === endDate);
