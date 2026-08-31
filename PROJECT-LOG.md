@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-31] Usage Variance: data-issues popup + every concept in the picker
+Shipped:   The Data completeness warnings on Usage Variance by Concept moved off the page into a popup behind a compact "N data issues" alert button on the coverage line (per Michael, after Cambridge's four failure lines dominated his screen). And the concept picker now shows every concept: Wildcraft, The Bauer Kitchen, and Sole had no menu value in the locations table so they never appeared — each now carries its own single-location concept, and all three already have 4-5 weeks of variance data waiting. PR #66 merged (f603c4c), production deploy verified READY.
+Roadmap:   Menu variance reporting -> all 16 locations covered across 4 concepts
+Decisions: Each Trinity restaurant is its own concept (distinct menus), matching how Michael described them; the executive statement function's concept grouping follows the same menu field automatically.
+Blockers:  none
+Next:      Michael refreshes and confirms the four concept buttons and the popup; Cambridge CSV still expected for the duplicate-line verification.
+
 [2026-08-31] Email button: one-click draft with all chef PDFs attached
 Shipped:   Email button beside Export on the Weekly Culinary Summary page. One click builds the report and every filed location's chef summary PDF, and downloads a ready-to-send .eml email draft — report as the body, one PDF attached per location, locations without a saved summary skipped and named. Opens in Outlook/Apple Mail/Thunderbird as an editable draft sent from the user's own address; no mail server or API key involved. PR #65 merged (883af69), production deploy verified READY. Verified typecheck/build clean, zero new lint findings, MIME structure and base64 round-trip smoke-tested.
 Roadmap:   Executive reporting -> email distribution (draft-file approach live)
