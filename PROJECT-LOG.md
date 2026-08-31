@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-25] Fixed silent truncation in variance pagination
+Shipped:   Michael's Usage Variance screen showed 9 of 13 locations for a week where the DB held 12 (only Cambridge genuinely missing) — Burlington/Toronto/Whitby had stored but their rows never loaded, and the completeness panel wrongly named them missing. Two silent-truncation paths in the paged fetch (page + statements function): no ORDER BY (page windows unstable under chef delete+reinsert churn) and a failed page treated as end-of-data. Both pagers now order by id and throw on page errors. PR #63 merged (b056a7e), production deploy verified READY, statements function redeployed (v6). Verified via REST that ordered paging returns all 5,641 W3 rows / 15 locations.
+Roadmap:   Menu variance data reliability -> pagination hardened
+Decisions: none
+Blockers:  none
+Next:      Michael refreshes the page (should show 12 of 13, Cambridge only); Cambridge chef re-uploads W1-W3 Count Amounts to close the last gap.
+
 [2026-08-25] OC item renumber: match across suffix changes
 Shipped:   Reviewed the OC rename Michael flagged: not just 25→26 — every suffix (22/23/24/25) moved to 26 in the week of Aug 16-23, splitting item histories (105 confirmed splits, ~300 more coming as weeks upload). Fix: all matching/aggregation now keys on the suffix-stripped name, displaying the newest variant — consolidated report + print sheet, guided week-vs-4-week comparison (sums old+new variants), and the executive statement's persistence/concept analysis (deployed). No historical data rewritten; future renumbers handled automatically. Verified BTW Butter Unsalted reads as one continuous 22→26 series.
 Roadmap:   Menu variance data reliability -> item matching hardened
