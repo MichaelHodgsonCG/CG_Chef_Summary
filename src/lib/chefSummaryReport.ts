@@ -8,7 +8,7 @@ import {
 } from './chefSummaryExport';
 
 export type ChefSummaryReportResult =
-  | { ok: true; url?: string }
+  | { ok: true; url?: string; base64?: string }
   | { ok: false; error: string };
 
 /**
@@ -20,7 +20,7 @@ export type ChefSummaryReportResult =
  * soon as the chef has re-saved the food-cost step.
  *
  * outputMode 'save' downloads the file; 'bloburl' returns an object URL for
- * in-app viewing.
+ * in-app viewing; 'base64' returns the raw PDF for email attachments.
  */
 export async function buildChefSummaryReport(
   locationId: string,
@@ -28,7 +28,7 @@ export async function buildChefSummaryReport(
   fiscalYear: number,
   period: number,
   week: number,
-  outputMode: 'save' | 'bloburl' = 'save'
+  outputMode: 'save' | 'bloburl' | 'base64' = 'save'
 ): Promise<ChefSummaryReportResult> {
   const { data: row } = await supabase
     .from('weekly_summary_chef_summary')
@@ -138,12 +138,16 @@ export async function buildChefSummaryReport(
     }
   }
 
-  const url = exportChefSummaryToPdf(
+  const out = exportChefSummaryToPdf(
     row, locationName, weekBudget, actualFoodCostPct, fcVariance, theoreticalFoodCostPct,
     theoreticalVariance, labourCostPct, lcVariance, chefName, weekEndingDate,
     sales, weekBudget, actualFoodCostPct, labourCostPct,
     foodCostCategories, weekAheadActions, fcapItems, outputMode, nextPeriodFcap
   ) as string | void;
 
-  return { ok: true, url: outputMode === 'bloburl' ? (url as string) : undefined };
+  return {
+    ok: true,
+    url: outputMode === 'bloburl' ? (out as string) : undefined,
+    base64: outputMode === 'base64' ? (out as string) : undefined,
+  };
 }
