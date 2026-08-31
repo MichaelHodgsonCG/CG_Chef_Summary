@@ -1004,8 +1004,29 @@ async function storeCountAmountsVariances(
     .eq('period_number', periodNumber)
     .eq('week_number', weekNumber);
 
-  if (items.length > 0) {
-    const rows = items.map((it) => ({
+  // Merge duplicate item lines before inserting: OC can list the same item
+  // more than once in a Count Amounts export, and the table's unique key
+  // (location/year/period/week/item_name) then fails the WHOLE insert with a
+  // duplicate-key error — exactly how Cambridge's uploads died for weeks.
+  // Summing the dollar fields per item is the honest consolidation.
+  const merged = new Map<string, CountAmountsRow>();
+  for (const it of items) {
+    const key = it.itemName.trim();
+    const prev = merged.get(key);
+    if (!prev) {
+      merged.set(key, { ...it, itemName: key });
+    } else {
+      prev.netVariance += it.netVariance;
+      prev.actualUsage += it.actualUsage;
+      prev.idealUsage += it.idealUsage;
+      prev.waste += it.waste;
+      if (!prev.category && it.category) prev.category = it.category;
+      if (!prev.uom && it.uom) prev.uom = it.uom;
+    }
+  }
+
+  if (merged.size > 0) {
+    const rows = [...merged.values()].map((it) => ({
       location_id: locationId,
       fiscal_year: fiscalYear,
       period_number: periodNumber,
