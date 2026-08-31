@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-31] Cambridge root cause found and fixed: duplicate item lines
+Shipped:   The failure banner did its job — Cambridge's re-upload surfaced the real error: duplicate key on (location, year, period, week, item_name), meaning their OC Count Amounts export lists at least one item name twice and the whole insert failed. That is what killed their stores silently since late July. Fix: duplicate item lines are now merged before insert (dollar fields summed, first non-empty category/uom kept). PR #64 merged (122c143), production deploy verified READY.
+Roadmap:   Menu variance data reliability -> Cambridge unblocked (re-upload pending)
+Decisions: Sum duplicate lines rather than reject the file — an item split across report lines is one item's totals, and the store must be robust to any location's export.
+Blockers:  none
+Next:      Cambridge chef hard-refreshes and re-uploads Count Amounts for the current week (and W1/W2 to backfill) — expect the green "N items stored" confirmation now.
+
 [2026-08-25] Fixed silent truncation in variance pagination
 Shipped:   Michael's Usage Variance screen showed 9 of 13 locations for a week where the DB held 12 (only Cambridge genuinely missing) — Burlington/Toronto/Whitby had stored but their rows never loaded, and the completeness panel wrongly named them missing. Two silent-truncation paths in the paged fetch (page + statements function): no ORDER BY (page windows unstable under chef delete+reinsert churn) and a failed page treated as end-of-data. Both pagers now order by id and throw on page errors. PR #63 merged (b056a7e), production deploy verified READY, statements function redeployed (v6). Verified via REST that ordered paging returns all 5,641 W3 rows / 15 locations.
 Roadmap:   Menu variance data reliability -> pagination hardened
