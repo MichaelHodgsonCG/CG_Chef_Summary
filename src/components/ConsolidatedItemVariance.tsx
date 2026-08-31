@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronRight, Download, ListOrdered, AlertTriangle, Table, MessageSquareText } from 'lucide-react';
+import { ChevronRight, Download, ListOrdered, AlertTriangle, Table, MessageSquareText, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { itemMatchKey } from '../lib/itemMatching';
 import { UsageVarianceReport } from './UsageVarianceReport';
@@ -54,6 +54,7 @@ export function ConsolidatedItemVariance() {
   // 'concept' = consolidated ranking across the menu; 'reasons' = the reasons
   // chefs recorded in the Guided Workflow's Usage Review (formerly its own page).
   const [mode, setMode] = useState<'concept' | 'reasons'>('concept');
+  const [issuesOpen, setIssuesOpen] = useState(false);
 
   useEffect(() => {
     loadMenus();
@@ -478,38 +479,70 @@ export function ConsolidatedItemVariance() {
         </div>
 
         {selectedWeeks.length > 0 && (
-          <div className={`text-xs flex items-center gap-1.5 ${fullCoverage ? 'text-cg-muted' : 'text-amber-700'}`}>
+          <div className={`text-xs flex items-center gap-2 flex-wrap ${fullCoverage ? 'text-cg-muted' : 'text-amber-700'}`}>
             {!fullCoverage && <AlertTriangle className="w-3.5 h-3.5" />}
-            {reportingCount} of {locations.length} locations have uploaded for the selected week{selectedWeeks.length > 1 ? 's' : ''}
-            {!fullCoverage && ' — ranking will fill in as the rest upload.'}
-          </div>
-        )}
-
-        {(coverageGaps.length > 0 || ingestFailures.length > 0) && (
-          <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1.5">
-            <p className="font-semibold text-amber-800 flex items-center gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5" /> Data completeness
-            </p>
-            {coverageGaps.map((g) => (
-              <p key={g.name} className="text-amber-800">
-                <span className="font-medium">{g.name}</span>: no items stored for{' '}
-                {g.weeks.map((w) => `WE ${w}`).join(', ')} — their column is blank for those weeks.
-              </p>
-            ))}
-            {ingestFailures.map((f) => (
-              <p key={`${f.location_id}-${f.created_at}`} className="text-red-700">
-                <span className="font-medium">{locName.get(f.location_id) ?? 'Unknown location'}</span>: store FAILED
-                for WE {f.week_ending_date} ({new Date(f.created_at).toLocaleString()})
-                {f.error_text ? ` — ${f.error_text}` : ''}
-              </p>
-            ))}
-            <p className="text-amber-700/80">
-              Fix: the chef re-opens the guided package's usage step and re-uploads the Count Amounts report —
-              they now see a stored/failed confirmation on that screen.
-            </p>
+            <span>
+              {reportingCount} of {locations.length} locations have uploaded for the selected week{selectedWeeks.length > 1 ? 's' : ''}
+              {!fullCoverage && ' — ranking will fill in as the rest upload.'}
+            </span>
+            {(coverageGaps.length > 0 || ingestFailures.length > 0) && (
+              <button
+                onClick={() => setIssuesOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 font-semibold hover:bg-amber-100 transition-colors"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                {coverageGaps.length + ingestFailures.length} data issue{coverageGaps.length + ingestFailures.length > 1 ? 's' : ''}
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {/* Data completeness popup — gaps and store failures live behind the alert
+          button so the page itself stays clean. */}
+      {issuesOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4"
+          onClick={() => setIssuesOpen(false)}
+        >
+          <div
+            className="bg-cg-surface rounded-xl border border-cg-border shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-cg-border sticky top-0 bg-cg-surface">
+              <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600" /> Data completeness
+              </h3>
+              <button
+                onClick={() => setIssuesOpen(false)}
+                className="p-1 rounded-lg text-cg-muted hover:bg-cg-surface2 hover:text-cg-text transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-2 text-xs">
+              {coverageGaps.map((g) => (
+                <p key={g.name} className="text-amber-800">
+                  <span className="font-medium">{g.name}</span>: no items stored for{' '}
+                  {g.weeks.map((w) => `WE ${w}`).join(', ')} — their column is blank for those weeks.
+                </p>
+              ))}
+              {ingestFailures.map((f) => (
+                <p key={`${f.location_id}-${f.created_at}`} className="text-red-700">
+                  <span className="font-medium">{locName.get(f.location_id) ?? 'Unknown location'}</span>: store FAILED
+                  for WE {f.week_ending_date} ({new Date(f.created_at).toLocaleString()})
+                  {f.error_text ? ` — ${f.error_text}` : ''}
+                </p>
+              ))}
+              <p className="text-amber-700/80 pt-1">
+                Fix: the chef re-opens the guided package's usage step and re-uploads the Count Amounts report —
+                they now see a stored/failed confirmation on that screen.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="bg-cg-surface rounded-xl border border-cg-border p-12 text-center text-sm text-cg-muted">Loading…</div>

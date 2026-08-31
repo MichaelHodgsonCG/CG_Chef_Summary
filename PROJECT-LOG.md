@@ -1,5 +1,12 @@
 # PROJECT-LOG — Weekly Summary
 
+[2026-08-31] Email button: one-click draft with all chef PDFs attached
+Shipped:   Email button beside Export on the Weekly Culinary Summary page. One click builds the report and every filed location's chef summary PDF, and downloads a ready-to-send .eml email draft — report as the body, one PDF attached per location, locations without a saved summary skipped and named. Opens in Outlook/Apple Mail/Thunderbird as an editable draft sent from the user's own address; no mail server or API key involved. PR #65 merged (883af69), production deploy verified READY. Verified typecheck/build clean, zero new lint findings, MIME structure and base64 round-trip smoke-tested.
+Roadmap:   Executive reporting -> email distribution (draft-file approach live)
+Decisions: Ship the .eml draft (works today, sends from Michael's own mailbox, no credentials) instead of server-side sending — a one-click in-app send needs an email provider API key and sending-domain setup, offered as a follow-up.
+Blockers:  none
+Next:      Michael tries the Email button on a real week; if he wants true in-app sending (or uses Gmail on the web, where .eml drafts don't open), set up an email provider and wire a send function.
+
 [2026-08-31] Cambridge root cause found and fixed: duplicate item lines
 Shipped:   The failure banner did its job — Cambridge's re-upload surfaced the real error: duplicate key on (location, year, period, week, item_name), meaning their OC Count Amounts export lists at least one item name twice and the whole insert failed. That is what killed their stores silently since late July. Fix: duplicate item lines are now merged before insert (dollar fields summed, first non-empty category/uom kept). PR #64 merged (122c143), production deploy verified READY.
 Roadmap:   Menu variance data reliability -> Cambridge unblocked (re-upload pending)
