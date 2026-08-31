@@ -335,8 +335,9 @@ export function exportChefSummaryToPdf(
   weekAheadActions?: WeekAheadAction[],
   fcapItems?: FcapRow[],
   // 'save' downloads the file (default); 'bloburl' returns an object URL for
-  // in-app viewing (e.g. embedding in an iframe) without forcing a download.
-  outputMode: 'save' | 'bloburl' = 'save',
+  // in-app viewing (e.g. embedding in an iframe) without forcing a download;
+  // 'base64' returns the raw PDF base64-encoded (for email attachments).
+  outputMode: 'save' | 'bloburl' | 'base64' = 'save',
   nextPeriodFcap?: NextPeriodFcap
 ): string | void {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
@@ -1001,6 +1002,10 @@ export function exportChefSummaryToPdf(
   const filename = `ChefSummary_${locationName.replace(/\s+/g, '_')}_FY${data.fiscal_year}_P${data.period_number}_W${data.week_number}.pdf`;
   if (outputMode === 'bloburl') {
     return doc.output('bloburl') as unknown as string;
+  }
+  if (outputMode === 'base64') {
+    const uri = doc.output('datauristring');
+    return uri.slice(uri.indexOf('base64,') + 'base64,'.length);
   }
   doc.save(filename);
 }

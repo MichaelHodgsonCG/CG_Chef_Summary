@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { FileText, Loader2, Download, Sparkles, Calendar, ChevronRight, Check } from 'lucide-react';
+import { FileText, Loader2, Download, Sparkles, Calendar, ChevronRight, Check, Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useCurrentFiscalPeriod, useFiscalCalendar } from '../lib/useFiscalCalendar';
-import { buildChefSummaryReport } from '../lib/chefSummaryReport';
+import { buildChefSummaryReport, ChefSummaryReportResult } from '../lib/chefSummaryReport';
+import { buildEmlBlob, downloadEml, EmailAttachment } from '../lib/emailDraft';
 
 type WeeklyReport = {
   id: string;
@@ -47,6 +48,8 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
   const [generating, setGenerating] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [generatingStatements, setGeneratingStatements] = useState(false);
+  const [emailing, setEmailing] = useState(false);
+  const [emailProgress, setEmailProgress] = useState<string | null>(null);
   const [completeness, setCompleteness] = useState<{ filed: number; total: number } | null>(null);
   // One auto-generation attempt per selected week, so a failed call doesn't loop.
   const autoOpeningTriedRef = useRef<string | null>(null);
@@ -321,8 +324,10 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report, completeness, currentPeriod?.fiscal_year, currentPeriod?.period, currentPeriod?.week]);
 
-  const exportReport = async () => {
-    if (!currentPeriod) return;
+  // Builds the export HTML plus everything the email draft needs — shared by
+  // Export (copy-paste window) and Email (draft with all chef PDFs attached).
+  const buildExportPackage = async () => {
+    if (!currentPeriod) return null;
 
     try {
       const { fiscal_year: fiscalYear, period, week } = currentPeriod;
@@ -810,22 +815,90 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
 </body>
 </html>`;
 
-      const win = window.open('', '_blank');
-      if (!win) {
-        throw new Error('Popup blocked — please allow popups for this site.');
-      }
-      win.document.write(html);
-      win.document.close();
-      showMessage('success', 'Report opened — select all and copy to paste into email');
+      // Plain ASCII subject — .eml headers must stay 7-bit without encoding.
+      const subject = `Weekly Culinary Summary - FY ${fiscalYear} P${period} W${week}${weekEndingDate ? ` (Week Ending ${weekEndingDate})` : ''}`;
+      const chefLocations = (currentWeekData || []).map(cs => ({
+        id: cs.location_id as string,
+        name: cs.locations.name as string,
+      }));
+      return { html, subject, chefLocations, fiscalYear, period, week };
     } catch (error) {
-      console.error('Error exporting report:', error);
-      showMessage('error', error instanceof Error ? error.message : 'Failed to export report');
+      console.error('Error building report:', error);
+      showMessage('error', error instanceof Error ? error.message : 'Failed to build report');
+      return null;
     }
   };
 
-  const showMessage = (type: 'success' | 'error', text: string) => {
+  const exportReport = async () => {
+    const pkg = await buildExportPackage();
+    if (!pkg) return;
+    const win = window.open('', '_blank');
+    if (!win) {
+      showMessage('error', 'Popup blocked — please allow popups for this site.');
+      return;
+    }
+    win.document.write(pkg.html);
+    win.document.close();
+    showMessage('success', 'Report opened — select all and copy to paste into email');
+  };
+
+  // Downloads a ready-to-send .eml draft: the export HTML as the body and one
+  // chef summary PDF attached per location that filed this week. Opened in a
+  // mail app it sends from the user's own address — no mail server involved.
+  const emailReport = async () => {
+    if (emailing) return;
+    setEmailing(true);
+    setEmailProgress('Building report…');
+    try {
+      const pkg = await buildExportPackage();
+      if (!pkg) return;
+
+      const attachments: EmailAttachment[] = [];
+      const missing: string[] = [];
+      const total = pkg.chefLocations.length;
+      let done = 0;
+      const batchSize = 4;
+      for (let i = 0; i < total; i += batchSize) {
+        const batch = pkg.chefLocations.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map(async loc => ({
+          loc,
+          res: await buildChefSummaryReport(loc.id, loc.name, pkg.fiscalYear, pkg.period, pkg.week, 'base64')
+            .catch((e): ChefSummaryReportResult => ({ ok: false, error: e instanceof Error ? e.message : 'Failed to build PDF.' })),
+        })));
+        for (const { loc, res } of results) {
+          if (res.ok && res.base64) {
+            attachments.push({
+              filename: `ChefSummary_${loc.name.replace(/\s+/g, '_')}_FY${pkg.fiscalYear}_P${pkg.period}_W${pkg.week}.pdf`,
+              base64: res.base64,
+            });
+          } else {
+            missing.push(loc.name);
+          }
+        }
+        done += batch.length;
+        setEmailProgress(`Building chef PDFs… ${Math.min(done, total)} of ${total}`);
+      }
+
+      const blob = buildEmlBlob(pkg.subject, pkg.html, attachments);
+      downloadEml(`WeeklyCulinarySummary_FY${pkg.fiscalYear}_P${pkg.period}_W${pkg.week}.eml`, blob);
+      const missingNote = missing.length > 0 ? ` (no saved summary: ${missing.join(', ')})` : '';
+      showMessage(
+        'success',
+        `Email draft downloaded — ${attachments.length} of ${total} chef PDFs attached${missingNote}. Open it in your mail app, add recipients, and send.`,
+        12000
+      );
+    } catch (error) {
+      console.error('Error building email draft:', error);
+      showMessage('error', error instanceof Error ? error.message : 'Failed to build email draft');
+    } finally {
+      setEmailing(false);
+      setEmailProgress(null);
+    }
+  };
+
+  const showMessage = (type: 'success' | 'error', text: string, durationMs = 3000) => {
     setMessage({ type, text });
-    setTimeout(() => setMessage(null), 3000);
+    setTimeout(() => setMessage(null), durationMs);
   };
 
   if ((fiscalLoading && !isUsingProps) || loading) {
@@ -926,6 +999,25 @@ export default function WeeklyExecutiveReport({ fiscalYear: propFiscalYear, peri
           >
             <Download className="w-4 h-4" />
             Export
+          </button>
+
+          <button
+            onClick={emailReport}
+            disabled={emailing}
+            title="Download a ready-to-send email draft with the report as the body and every location's chef PDF attached"
+            className="flex items-center gap-2 px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-cg-accentHover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {emailing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {emailProgress || 'Building…'}
+              </>
+            ) : (
+              <>
+                <Mail className="w-4 h-4" />
+                Email
+              </>
+            )}
           </button>
         </div>
       </div>
